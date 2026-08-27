@@ -1,35 +1,28 @@
-import Versions from './components/Versions'
-import electronLogo from './assets/electron.svg'
+import IconRail from './components/sidebar/IconRail'
+import SidebarPanel from './components/sidebar/SidebarPanel'
+import SmartInboxView from './views/SmartInboxView'
+import GroupListView from './views/GroupListView'
+import { useAppStore } from './store'
 
-function App(): React.JSX.Element {
-  const ipcHandle = (): void => window.electron.ipcRenderer.send('ping')
+export default function App(): React.JSX.Element {
+  const view = useAppStore((s) => s.view)
+  const railItem = useAppStore((s) => s.railItem)
+  const setRailItem = useAppStore((s) => s.setRailItem)
+  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
 
   return (
-    <>
-      <img alt="logo" className="logo" src={electronLogo} />
-      <div className="creator">Powered by electron-vite</div>
-      <div className="text">
-        Build an Electron app with <span className="react">React</span>
-        &nbsp;and <span className="ts">TypeScript</span>
+    <div className="flex h-full">
+      <div className="shrink-0 bg-[#17181b]">
+        <IconRail
+          active={railItem}
+          onSelect={setRailItem}
+          onOpenSidebar={() => setSidebarOpen(true)}
+        />
       </div>
-      <p className="tip">
-        Please try pressing <code>F12</code> to open the devTool
-      </p>
-      <div className="actions">
-        <div className="action">
-          <a href="https://electron-vite.org/" target="_blank" rel="noreferrer">
-            Documentation
-          </a>
-        </div>
-        <div className="action">
-          <a target="_blank" rel="noreferrer" onClick={ipcHandle}>
-            Send IPC
-          </a>
-        </div>
-      </div>
-      <Versions></Versions>
-    </>
+      <main className="relative flex-1 overflow-hidden">
+        {view.name === 'inbox' ? <SmartInboxView /> : <GroupListView category={view.category} />}
+      </main>
+      <SidebarPanel />
+    </div>
   )
 }
-
-export default App
