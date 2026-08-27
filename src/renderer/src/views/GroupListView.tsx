@@ -3,7 +3,7 @@ import { ArrowLeft, Check, PenLine, Search } from 'lucide-react'
 import DateSection from '../components/inbox/DateSection'
 import EmailRow from '../components/inbox/EmailRow'
 import { groupByBucket } from '../lib/dates'
-import { useAppStore } from '../store'
+import { filterByAccount, useAppStore } from '../store'
 import { CATEGORY_LABELS, type Category, type Email } from '../data/types'
 import { cn } from '../lib/utils'
 
@@ -13,11 +13,11 @@ interface GroupListViewProps {
 
 export default function GroupListView({ category }: GroupListViewProps): React.JSX.Element {
   const emails = useAppStore((s) => s.emails)
-  const selectedEmailId = useAppStore((s) => s.selectedEmailId)
-  const selectEmail = useAppStore((s) => s.selectEmail)
-  const backToInbox = useAppStore((s) => s.backToInbox)
+  const activeAccountId = useAppStore((s) => s.activeAccountId)
+  const openEmail = useAppStore((s) => s.openEmail)
+  const back = useAppStore((s) => s.back)
 
-  const list = emails
+  const list = filterByAccount(emails, activeAccountId)
     .filter((e) => e.folder === 'inbox' && e.category === category && !e.important)
     .sort((a: Email, b: Email) => b.date.localeCompare(a.date))
   const buckets = groupByBucket(list, (e) => e.date)
@@ -33,7 +33,7 @@ export default function GroupListView({ category }: GroupListViewProps): React.J
         <div className="no-drag flex items-center">
           <button
             aria-label="Back to inbox"
-            onClick={backToInbox}
+            onClick={back}
             className="flex h-[28px] w-[34px] items-center justify-center rounded-l-[8px] bg-elevation-2 text-text-bright transition-colors hover:text-ink"
           >
             <ArrowLeft size={15} />
@@ -73,12 +73,7 @@ export default function GroupListView({ category }: GroupListViewProps): React.J
           <div key={bucket}>
             <DateSection label={bucket} className={cn('pl-[10px] mb-1.5', i === 0 ? 'mt-2' : 'mt-5')} />
             {items.map((email) => (
-              <EmailRow
-                key={email.id}
-                email={email}
-                selected={email.id === selectedEmailId}
-                onClick={() => selectEmail(email.id)}
-              />
+              <EmailRow key={email.id} email={email} onClick={() => openEmail(email.id)} />
             ))}
           </div>
         ))}

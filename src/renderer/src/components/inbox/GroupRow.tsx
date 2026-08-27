@@ -6,7 +6,6 @@ interface GroupRowProps {
   category: Category
   emails: Email[]
   onOpen: () => void
-  focused?: boolean
 }
 
 const CATEGORY_STYLES: Record<Category, { chip: string; icon: string; Icon: LucideIcon }> = {
@@ -36,12 +35,7 @@ function senderChips(emails: Email[]): Chip[] {
   return [...byName.values()].slice(0, 6)
 }
 
-export default function GroupRow({
-  category,
-  emails,
-  onOpen,
-  focused = false
-}: GroupRowProps): React.JSX.Element {
+export default function GroupRow({ category, emails, onOpen }: GroupRowProps): React.JSX.Element {
   const { chip, icon, Icon } = CATEGORY_STYLES[category]
   const hasUnread = emails.some((e) => !e.read)
   const chips = senderChips(emails)
@@ -51,31 +45,14 @@ export default function GroupRow({
       onClick={onOpen}
       className={cn(
         'group relative flex h-[41px] w-full items-center rounded-[15px] border border-transparent',
-        'pl-[90px] pr-[30px] text-left transition-colors',
-        focused ? 'bg-blue-0' : 'hover:bg-elevation-1'
+        'pl-[90px] pr-[30px] text-left transition-colors hover:bg-elevation-1'
       )}
     >
       <span className="absolute left-[10px] flex items-center gap-[7px]">
-        <span
-          className={cn(
-            'flex items-center justify-center rounded-full',
-            focused
-              ? 'h-[22px] w-[22px] bg-white/10'
-              : 'h-[18px] w-[18px] border-[1.5px] border-text-muted'
-          )}
-        >
-          <Check
-            size={focused ? 13 : 11}
-            className={cn(
-              focused
-                ? 'text-[#5d9df8]'
-                : 'opacity-0 text-text-muted group-hover:opacity-100'
-            )}
-          />
+        <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted opacity-0 group-hover:opacity-100">
+          <Check size={11} className="text-text-muted" />
         </span>
-        {hasUnread && (
-          <span className={cn('h-2 w-2 rounded-full', focused ? 'bg-[#5d9df8]' : 'bg-blue-3')} />
-        )}
+        {hasUnread && <span className="h-2 w-2 rounded-full bg-blue-3" />}
         <span className={cn('flex h-[26px] w-[26px] items-center justify-center rounded-full', chip)}>
           <Icon size={14} strokeWidth={2} className={icon} />
         </span>

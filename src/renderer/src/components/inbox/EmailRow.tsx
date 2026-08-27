@@ -5,30 +5,22 @@ import { cn } from '../../lib/utils'
 
 interface EmailRowProps {
   email: Email
-  selected?: boolean
   onClick?: () => void
 }
 
-export default function EmailRow({
-  email,
-  selected = false,
-  onClick
-}: EmailRowProps): React.JSX.Element {
+export default function EmailRow({ email, onClick }: EmailRowProps): React.JSX.Element {
   return (
     <button
       onClick={onClick}
-      className={cn(
-        'flex h-[42px] w-full items-center gap-[10px] rounded-[10px] px-[10px] text-left transition-colors',
-        selected ? 'bg-blue-1' : 'hover:bg-elevation-1'
-      )}
+      className="group flex h-[42px] w-full items-center gap-[10px] rounded-[10px] px-[10px] text-left transition-colors hover:bg-elevation-1"
     >
       <span className="flex w-[26px] shrink-0 items-center justify-center">
-        {selected ? (
-          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-white/50">
-            <Check size={11} className="text-white" />
+        {email.read ? (
+          <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted opacity-0 group-hover:opacity-100">
+            <Check size={11} className="text-text-muted" />
           </span>
         ) : (
-          !email.read && <span className="h-2 w-2 rounded-full bg-blue-3" />
+          <span className="h-2 w-2 rounded-full bg-blue-3" />
         )}
       </span>
 

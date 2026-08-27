@@ -78,16 +78,34 @@ function NavRow({
   )
 }
 
-function AccountRow({ account, count }: { account: Account; count?: number }): React.JSX.Element {
+function AccountRow({
+  account,
+  count,
+  active = false,
+  onClick
+}: {
+  account: Account
+  count?: number
+  active?: boolean
+  onClick?: () => void
+}): React.JSX.Element {
   return (
-    <div className="flex h-[34px] items-center gap-2.5 rounded-[10px] pl-[42px] pr-2.5 hover:bg-white/5">
+    <div
+      onClick={onClick}
+      className={cn(
+        'flex h-[34px] cursor-default items-center gap-2.5 rounded-[10px] pl-[42px] pr-2.5 hover:bg-white/5',
+        active && 'bg-white/5'
+      )}
+    >
       <span
         className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white"
         style={{ backgroundColor: account.color }}
       >
         {accountInitials(account)}
       </span>
-      <span className="truncate text-[14px] text-text-primary">{account.name}</span>
+      <span className={cn('truncate text-[14px]', active ? 'text-white' : 'text-text-primary')}>
+        {account.name}
+      </span>
       {count !== undefined && count > 0 && (
         <span className="ml-auto text-[13px] text-text-secondary">{count}</span>
       )}
@@ -107,7 +125,11 @@ function FolderGroup({
   defaultExpanded?: boolean
 }): React.JSX.Element {
   const railItem = useAppStore((s) => s.railItem)
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const setRailItem = useAppStore((s) => s.setRailItem)
+  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
+  const activeAccountId = useAppStore((s) => s.activeAccountId)
+  const setAccount = useAppStore((s) => s.setAccount)
+  const [expanded] = useState(defaultExpanded)
   return (
     <div>
       <NavRow
@@ -116,9 +138,24 @@ function FolderGroup({
         active={railItem === item}
         expandable
         expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => {
+          setRailItem(item)
+          setSidebarOpen(false)
+        }}
       />
-      {expanded && accounts.map((a) => <AccountRow key={a.id} account={a} />)}
+      {expanded &&
+        accounts.map((a) => (
+          <AccountRow
+            key={a.id}
+            account={a}
+            active={activeAccountId === a.id}
+            onClick={() => {
+              setAccount(a.id)
+              setRailItem(item)
+              setSidebarOpen(false)
+            }}
+          />
+        ))}
     </div>
   )
 }
@@ -129,7 +166,10 @@ export default function SidebarPanel(): React.JSX.Element {
   const railItem = useAppStore((s) => s.railItem)
   const setRailItem = useAppStore((s) => s.setRailItem)
   const emails = useAppStore((s) => s.emails)
-  const [inboxExpanded, setInboxExpanded] = useState(true)
+  const activeAccountId = useAppStore((s) => s.activeAccountId)
+  const setAccount = useAppStore((s) => s.setAccount)
+  const goInbox = useAppStore((s) => s.goInbox)
+  const [inboxExpanded] = useState(true)
 
   useEffect(() => {
     if (!sidebarOpen) return undefined
@@ -181,7 +221,10 @@ export default function SidebarPanel(): React.JSX.Element {
                 label="Home Screen"
                 icon={<House size={17} />}
                 active={railItem === 'home'}
-                onClick={() => setRailItem('home')}
+                onClick={() => {
+                  setRailItem('home')
+                  setSidebarOpen(false)
+                }}
               />
 
               <NavRow
@@ -191,12 +234,25 @@ export default function SidebarPanel(): React.JSX.Element {
                 expandable
                 expanded={inboxExpanded}
                 onClick={() => {
-                  setRailItem('inbox')
-                  setInboxExpanded((v) => !v)
+                  setAccount('all')
+                  goInbox()
+                  setSidebarOpen(false)
                 }}
               />
               {inboxExpanded &&
-                accounts.map((a) => <AccountRow key={a.id} account={a} count={unreadCount(a.id)} />)}
+                accounts.map((a) => (
+                  <AccountRow
+                    key={a.id}
+                    account={a}
+                    count={unreadCount(a.id)}
+                    active={activeAccountId === a.id}
+                    onClick={() => {
+                      setAccount(a.id)
+                      goInbox()
+                      setSidebarOpen(false)
+                    }}
+                  />
+                ))}
 
               <NavRow
                 label="Calendar"

@@ -5,18 +5,18 @@ import EmailRow from '../components/inbox/EmailRow'
 import SetAsidePill from '../components/inbox/SetAsidePill'
 import AskBar from '../components/inbox/AskBar'
 import { groupByBucket } from '../lib/dates'
-import { useAppStore } from '../store'
+import { filterByAccount, useAppStore } from '../store'
 import type { Category, Email } from '../data/types'
 
 const GROUP_ORDER: Category[] = ['notifications', 'people', 'invites']
 
 export default function SmartInboxView(): React.JSX.Element {
   const emails = useAppStore((s) => s.emails)
-  const selectedEmailId = useAppStore((s) => s.selectedEmailId)
-  const selectEmail = useAppStore((s) => s.selectEmail)
+  const activeAccountId = useAppStore((s) => s.activeAccountId)
+  const openEmail = useAppStore((s) => s.openEmail)
   const openGroup = useAppStore((s) => s.openGroup)
 
-  const inbox = emails.filter((e) => e.folder === 'inbox')
+  const inbox = filterByAccount(emails, activeAccountId).filter((e) => e.folder === 'inbox')
   const byDateDesc = (a: Email, b: Email): number => b.date.localeCompare(a.date)
 
   const groups = GROUP_ORDER.map((category) => ({
@@ -32,12 +32,11 @@ export default function SmartInboxView(): React.JSX.Element {
       <InboxHeader />
       <div className="flex-1 overflow-y-auto px-[30px] pb-[80px]">
         <DateSection label="Today" className="pl-[50px] mb-2 mt-1" />
-        {groups.map((g, i) => (
+        {groups.map((g) => (
           <GroupRow
             key={g.category}
             category={g.category}
             emails={g.emails}
-            focused={i === 0}
             onOpen={() => openGroup(g.category)}
           />
         ))}
@@ -45,24 +44,14 @@ export default function SmartInboxView(): React.JSX.Element {
           bucket === 'Today' ? (
             <div key={bucket} className="mt-1">
               {items.map((email) => (
-                <EmailRow
-                  key={email.id}
-                  email={email}
-                  selected={email.id === selectedEmailId}
-                  onClick={() => selectEmail(email.id)}
-                />
+                <EmailRow key={email.id} email={email} onClick={() => openEmail(email.id)} />
               ))}
             </div>
           ) : (
             <div key={bucket}>
               <DateSection label={bucket} className="pl-[50px] mt-5 mb-2" />
               {items.map((email) => (
-                <EmailRow
-                  key={email.id}
-                  email={email}
-                  selected={email.id === selectedEmailId}
-                  onClick={() => selectEmail(email.id)}
-                />
+                <EmailRow key={email.id} email={email} onClick={() => openEmail(email.id)} />
               ))}
             </div>
           )

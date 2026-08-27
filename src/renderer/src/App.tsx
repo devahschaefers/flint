@@ -2,6 +2,8 @@ import IconRail from './components/sidebar/IconRail'
 import SidebarPanel from './components/sidebar/SidebarPanel'
 import SmartInboxView from './views/SmartInboxView'
 import GroupListView from './views/GroupListView'
+import FolderListView from './views/FolderListView'
+import EmailView from './views/EmailView'
 import { useAppStore } from './store'
 
 export default function App(): React.JSX.Element {
@@ -20,7 +22,10 @@ export default function App(): React.JSX.Element {
         />
       </div>
       <main className="relative flex-1 overflow-hidden">
-        {view.name === 'inbox' ? <SmartInboxView /> : <GroupListView category={view.category} />}
+        {view.name === 'inbox' && <SmartInboxView />}
+        {view.name === 'group' && <GroupListView category={view.category} />}
+        {view.name === 'folder' && <FolderListView folder={view.folder} />}
+        {view.name === 'email' && <EmailView emailId={view.emailId} />}
       </main>
       <SidebarPanel />
     </div>
