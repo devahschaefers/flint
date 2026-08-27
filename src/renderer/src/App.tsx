@@ -1,33 +1,81 @@
+import { useEffect } from 'react'
 import IconRail from './components/sidebar/IconRail'
 import SidebarPanel from './components/sidebar/SidebarPanel'
+import SearchOverlay from './components/search/SearchOverlay'
+import ComposerModal from './components/compose/ComposerModal'
 import SmartInboxView from './views/SmartInboxView'
 import GroupListView from './views/GroupListView'
 import FolderListView from './views/FolderListView'
 import EmailView from './views/EmailView'
+import SettingsView from './views/SettingsView'
 import { useAppStore } from './store'
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target.isContentEditable
+  )
+}
 
 export default function App(): React.JSX.Element {
   const view = useAppStore((s) => s.view)
-  const railItem = useAppStore((s) => s.railItem)
-  const setRailItem = useAppStore((s) => s.setRailItem)
-  const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      const s = useAppStore.getState()
+      const mod = e.metaKey || e.ctrlKey
+
+      // Escape closes only the topmost layer: search > composer > sidebar > back
+      if (e.key === 'Escape') {
+        if (s.searchOpen) {
+          e.preventDefault()
+          s.setSearchOpen(false)
+        } else if (s.composer.open) {
+          // ComposerModal's own listener saves-or-closes; this branch only stops
+          // the chain so Escape never also navigates the view behind the modal
+        } else if (s.sidebarOpen) {
+          e.preventDefault()
+          s.setSidebarOpen(false)
+        } else if (s.view.name === 'email' || s.view.name === 'settings') {
+          e.preventDefault()
+          s.back()
+        }
+        return
+      }
+
+      if (isEditableTarget(e.target)) return
+
+      if ((mod && e.key.toLowerCase() === 'k') || (!mod && e.key === '/')) {
+        e.preventDefault()
+        s.setSearchOpen(true)
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'n') {
+        e.preventDefault()
+        s.openCompose()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return (): void => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   return (
     <div className="flex h-full">
       <div className="shrink-0 bg-[#17181b]">
-        <IconRail
-          active={railItem}
-          onSelect={setRailItem}
-          onOpenSidebar={() => setSidebarOpen(true)}
-        />
+        <IconRail />
       </div>
       <main className="relative flex-1 overflow-hidden">
         {view.name === 'inbox' && <SmartInboxView />}
         {view.name === 'group' && <GroupListView category={view.category} />}
         {view.name === 'folder' && <FolderListView folder={view.folder} />}
         {view.name === 'email' && <EmailView emailId={view.emailId} />}
+        {view.name === 'settings' && <SettingsView />}
       </main>
       <SidebarPanel />
+      <SearchOverlay />
+      <ComposerModal />
     </div>
   )
 }

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
+  Archive,
   ChevronRight,
   File,
   House,
@@ -9,7 +10,6 @@ import {
   Pin,
   RefreshCw,
   Send,
-  Sparkles,
   SquareX,
   Trash2
 } from 'lucide-react'
@@ -26,24 +26,14 @@ function accountInitials(account: Account): string {
   return account.name.charAt(0).toUpperCase()
 }
 
-function CalendarGlyph(): React.JSX.Element {
-  const day = new Date().getDate()
-  return (
-    <span className="relative flex h-[17px] w-[17px] items-end justify-center rounded-[4px] border-[1.5px] border-current">
-      <span className="absolute -top-[3px] left-[2.5px] h-[2.5px] w-[1.5px] rounded-full bg-current" />
-      <span className="absolute -top-[3px] right-[2.5px] h-[2.5px] w-[1.5px] rounded-full bg-current" />
-      <span className="pb-px text-[8px] font-semibold leading-none">{day}</span>
-    </span>
-  )
-}
-
 function NavRow({
   label,
   icon,
   active = false,
   expandable = false,
   expanded = false,
-  onClick
+  onClick,
+  onToggle
 }: {
   label: string
   icon: React.ReactNode
@@ -51,6 +41,8 @@ function NavRow({
   expandable?: boolean
   expanded?: boolean
   onClick?: () => void
+  /** Clicking the chevron expands/collapses without triggering the row's onClick */
+  onToggle?: () => void
 }): React.JSX.Element {
   return (
     <div
@@ -60,7 +52,17 @@ function NavRow({
         active ? 'bg-blue-4 text-white' : 'hover:bg-white/5'
       )}
     >
-      <span className="flex w-[16px] shrink-0 items-center justify-center">
+      <span
+        className="flex w-[16px] shrink-0 items-center justify-center"
+        onClick={
+          expandable && onToggle
+            ? (e): void => {
+                e.stopPropagation()
+                onToggle()
+              }
+            : undefined
+        }
+      >
         {expandable && (
           <ChevronRight
             size={13}
@@ -124,20 +126,21 @@ function FolderGroup({
   item: RailItem
   defaultExpanded?: boolean
 }): React.JSX.Element {
-  const railItem = useAppStore((s) => s.railItem)
   const setRailItem = useAppStore((s) => s.setRailItem)
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const setAccount = useAppStore((s) => s.setAccount)
-  const [expanded] = useState(defaultExpanded)
+  const view = useAppStore((s) => s.view)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   return (
     <div>
       <NavRow
         label={label}
         icon={icon}
-        active={railItem === item}
+        active={view.name === 'folder' && view.folder === item}
         expandable
         expanded={expanded}
+        onToggle={() => setExpanded((v) => !v)}
         onClick={() => {
           setRailItem(item)
           setSidebarOpen(false)
@@ -169,16 +172,14 @@ export default function SidebarPanel(): React.JSX.Element {
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const setAccount = useAppStore((s) => s.setAccount)
   const goInbox = useAppStore((s) => s.goInbox)
-  const [inboxExpanded] = useState(true)
+  const view = useAppStore((s) => s.view)
+  const openFolder = useAppStore((s) => s.openFolder)
+  const openSettings = useAppStore((s) => s.openSettings)
+  const refreshInbox = useAppStore((s) => s.refreshInbox)
+  const [inboxExpanded, setInboxExpanded] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
-  useEffect(() => {
-    if (!sidebarOpen) return undefined
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setSidebarOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [sidebarOpen, setSidebarOpen])
+  // Escape handling lives in App.tsx's single ordered handler (search > composer > sidebar > back)
 
   const unreadCount = (accountId: string): number =>
     emails.filter((e) => e.accountId === accountId && e.folder === 'inbox' && !e.read).length
@@ -204,8 +205,17 @@ export default function SidebarPanel(): React.JSX.Element {
             transition={{ duration: 0.22, ease: [0, 0, 0.2, 1] }}
           >
             <div className="drag-region flex h-[46px] shrink-0 items-center justify-end gap-3 px-3.5 text-text-bright">
-              <button aria-label="Refresh" className="no-drag hover:text-ink">
-                <RefreshCw size={15} />
+              <button
+                aria-label="Refresh"
+                title="Refresh"
+                onClick={() => {
+                  refreshInbox()
+                  setRefreshing(true)
+                  window.setTimeout(() => setRefreshing(false), 700)
+                }}
+                className="no-drag hover:text-ink"
+              >
+                <RefreshCw size={15} className={cn(refreshing && 'animate-spin')} />
               </button>
               <button
                 aria-label="Close Sidebar"
@@ -220,7 +230,7 @@ export default function SidebarPanel(): React.JSX.Element {
               <NavRow
                 label="Home Screen"
                 icon={<House size={17} />}
-                active={railItem === 'home'}
+                active={view.name === 'inbox' && railItem === 'home'}
                 onClick={() => {
                   setRailItem('home')
                   setSidebarOpen(false)
@@ -230,9 +240,10 @@ export default function SidebarPanel(): React.JSX.Element {
               <NavRow
                 label="Inbox"
                 icon={<Inbox size={17} />}
-                active={railItem === 'inbox'}
+                active={view.name === 'inbox' && railItem !== 'home'}
                 expandable
                 expanded={inboxExpanded}
+                onToggle={() => setInboxExpanded((v) => !v)}
                 onClick={() => {
                   setAccount('all')
                   goInbox()
@@ -254,13 +265,6 @@ export default function SidebarPanel(): React.JSX.Element {
                   />
                 ))}
 
-              <NavRow
-                label="Calendar"
-                icon={<CalendarGlyph />}
-                active={railItem === 'calendar'}
-                onClick={() => setRailItem('calendar')}
-              />
-
               <div className="h-3" />
 
               <FolderGroup label="Pins" icon={<Pin size={17} />} item="pins" />
@@ -268,11 +272,25 @@ export default function SidebarPanel(): React.JSX.Element {
               <FolderGroup label="Sent" icon={<Send size={17} />} item="sent" />
               <FolderGroup label="Trash" icon={<Trash2 size={17} />} item="trash" defaultExpanded />
               <FolderGroup label="Spam" icon={<SquareX size={17} />} item="spam" defaultExpanded />
+              <NavRow
+                label="Archive"
+                icon={<Archive size={17} />}
+                active={view.name === 'folder' && view.folder === 'archive'}
+                onClick={() => {
+                  openFolder('archive')
+                  setSidebarOpen(false)
+                }}
+              />
             </nav>
 
             <div className="mt-auto shrink-0 border-t border-white/5 px-[10px] pb-3 pt-1">
-              <NavRow label="AI Agents" icon={<Sparkles size={17} />} />
-              <div className="flex h-[38px] cursor-default items-center gap-2.5 rounded-[10px] pl-1 pr-2.5 text-[14px] text-text-primary hover:bg-white/5">
+              <div
+                onClick={() => {
+                  openSettings()
+                  setSidebarOpen(false)
+                }}
+                className="flex h-[38px] cursor-default items-center gap-2.5 rounded-[10px] pl-1 pr-2.5 text-[14px] text-text-primary hover:bg-white/5"
+              >
                 <span className="w-[16px] shrink-0" />
                 <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#2E7D32] text-[10px] font-semibold text-white">
                   DS

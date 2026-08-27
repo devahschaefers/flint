@@ -42,13 +42,6 @@
 
 /* Non-utility tokens */
 :root {
-  /* AI ask-bar gradient ring (Spark's --gradient-border-colors) */
-  --gradient-border-colors: linear-gradient(
-    91deg,
-    rgba(70, 162, 255, 0.3) 0%,
-    rgba(140, 138, 255, 0.3) 49.52%,
-    rgba(180, 113, 250, 0.3) 100%
-  );
   --sidebar-margin-left: 21px;
   --rail-width: 72px;
 }

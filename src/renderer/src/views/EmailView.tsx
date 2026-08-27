@@ -1,7 +1,10 @@
+import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
-import { ArrowLeft, Check, PenLine, Search } from 'lucide-react'
+import { ArrowLeft, Check, Pin } from 'lucide-react'
 import { shortDate } from '../lib/dates'
 import { useAppStore } from '../store'
+import { cn } from '../lib/utils'
+import HeaderControls from '../components/inbox/HeaderControls'
 
 interface EmailViewProps {
   emailId: string
@@ -10,13 +13,44 @@ interface EmailViewProps {
 export default function EmailView({ emailId }: EmailViewProps): React.JSX.Element | null {
   const emails = useAppStore((s) => s.emails)
   const back = useAppStore((s) => s.back)
+  const toggleDone = useAppStore((s) => s.toggleDone)
+  const togglePin = useAppStore((s) => s.togglePin)
+  const sendReply = useAppStore((s) => s.sendReply)
+  const openCompose = useAppStore((s) => s.openCompose)
+
+  const [replyOpen, setReplyOpen] = useState(false)
+  const [replyText, setReplyText] = useState('')
 
   const email = emails.find((e) => e.id === emailId)
-  if (!email) return null
+  const isDraft = email?.folder === 'drafts'
+
+  /** Drafts always edit in the composer, never in the reading view */
+  useEffect(() => {
+    if (isDraft) {
+      openCompose(emailId)
+      back()
+    }
+  }, [isDraft, emailId, openCompose, back])
+
+  if (!email || isDraft) return null
 
   const firstName = email.sender.name.split(' ')[0]
-  /** For sent/drafts the contact on the email is the recipient, not the author */
-  const outgoing = email.folder === 'sent' || email.folder === 'drafts'
+  /** For sent mail the contact on the email is the recipient, not the author */
+  const outgoing = email.folder === 'sent'
+
+  const canSend = replyText.trim().length > 0
+
+  const handleSend = (): void => {
+    if (!canSend) return
+    sendReply(emailId, replyText)
+    setReplyText('')
+    setReplyOpen(false)
+  }
+
+  const handleCancel = (): void => {
+    setReplyText('')
+    setReplyOpen(false)
+  }
 
   return (
     <motion.div
@@ -29,6 +63,7 @@ export default function EmailView({ emailId }: EmailViewProps): React.JSX.Elemen
         <div className="no-drag flex items-center">
           <button
             aria-label="Back"
+            title="Back"
             onClick={back}
             className="flex h-[28px] w-[34px] items-center justify-center rounded-l-[8px] bg-elevation-2 text-text-bright transition-colors hover:text-ink"
           >
@@ -36,33 +71,36 @@ export default function EmailView({ emailId }: EmailViewProps): React.JSX.Elemen
           </button>
           <span className="h-[28px] w-px bg-transparent" />
           <button
-            aria-label="Mark done"
+            aria-label={email.done ? 'Mark not done' : 'Done'}
+            title={email.done ? 'Mark not done' : 'Done'}
+            onClick={() => {
+              toggleDone(emailId)
+              back()
+            }}
             className="flex h-[28px] w-[34px] items-center justify-center rounded-r-[8px] bg-elevation-2 text-text-bright transition-colors hover:text-ink"
           >
             <Check size={15} />
           </button>
         </div>
 
-        <div className="no-drag flex items-center gap-4 text-text-bright">
+        <div className="no-drag flex items-center gap-4">
           <button
-            aria-label="Hide done emails"
-            className="flex h-[18px] w-[34px] items-center rounded-full bg-elevation-3 px-[2px]"
+            aria-label={email.pinned ? 'Unpin' : 'Pin'}
+            title={email.pinned ? 'Unpin' : 'Pin'}
+            onClick={() => togglePin(emailId)}
+            className={cn(
+              'transition-colors duration-150',
+              email.pinned ? 'text-yellow-3' : 'text-text-bright hover:text-ink'
+            )}
           >
-            <span className="flex h-[14px] w-[14px] items-center justify-center rounded-full bg-white">
-              <Check size={9} strokeWidth={3.5} className="text-elevation-0" />
-            </span>
+            <Pin size={19} strokeWidth={1.8} fill={email.pinned ? 'currentColor' : 'none'} />
           </button>
-          <button aria-label="Search" className="transition-colors hover:text-ink">
-            <Search size={19} />
-          </button>
-          <button aria-label="Compose" className="transition-colors hover:text-ink">
-            <PenLine size={19} />
-          </button>
+          <HeaderControls />
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[860px] px-[30px] pt-6 pb-28">
+        <div className="select-text mx-auto w-full max-w-[860px] px-[30px] pt-6 pb-28">
           <h1 className="text-[20px] font-semibold leading-snug text-text-primary">
             {email.subject}
           </h1>
@@ -92,13 +130,66 @@ export default function EmailView({ emailId }: EmailViewProps): React.JSX.Elemen
               {paragraph}
             </p>
           ))}
+
+          {email.replies.map((reply, i) => (
+            <div key={i}>
+              <div className="border-t border-white/5 my-5" />
+              <div className="text-[12px] text-text-secondary mb-2">
+                You · {shortDate(reply.date)}
+              </div>
+              {reply.body.map((paragraph, j) => (
+                <p key={j} className="text-[14px] leading-[1.65] text-[#c6c9cd] mb-4">
+                  {paragraph}
+                </p>
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 
       <div className="absolute bottom-[22px] left-1/2 w-[calc(100%-60px)] max-w-[860px] -translate-x-1/2">
-        <div className="flex h-[44px] items-center rounded-[22px] border border-white/10 bg-elevation-1 px-4 text-[13px] text-text-secondary shadow-[0_4px_15px_rgba(0,0,0,0.25)]">
-          {email.folder === 'drafts' ? 'Continue draft...' : `Reply to ${firstName}...`}
-        </div>
+        {replyOpen ? (
+          <div className="rounded-[14px] border border-white/10 bg-elevation-1 p-3 shadow-[0_4px_15px_rgba(0,0,0,0.25)]">
+            <textarea
+              autoFocus
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                  e.preventDefault()
+                  handleSend()
+                }
+              }}
+              placeholder={`Reply to ${firstName}...`}
+              className="select-text min-h-[96px] w-full resize-none bg-transparent text-[13px] text-text-primary outline-none placeholder:text-text-secondary"
+            />
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={handleCancel}
+                className="h-7 rounded-[7px] px-3 text-[12px] text-text-secondary transition-colors hover:text-text-primary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={!canSend}
+                className={cn(
+                  'h-7 rounded-[7px] bg-blue-4 px-4 text-[12px] font-semibold text-white transition-colors hover:bg-blue-3',
+                  !canSend && 'cursor-default opacity-40 hover:bg-blue-4'
+                )}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setReplyOpen(true)}
+            className="flex h-[44px] w-full items-center rounded-[22px] border border-white/10 bg-elevation-1 px-4 text-[13px] text-text-secondary shadow-[0_4px_15px_rgba(0,0,0,0.25)] transition-colors hover:bg-elevation-2"
+          >
+            {`Reply to ${firstName}...`}
+          </button>
+        )}
       </div>
     </motion.div>
   )

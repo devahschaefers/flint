@@ -17,7 +17,7 @@ const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        'z-50 min-w-[180px] rounded-[10px] border border-white/10 bg-elevation-2 p-1 text-[13px] text-text-primary shadow-[0_10px_60px_0_rgba(0,0,0,0.4)]',
+        'z-[80] min-w-[180px] rounded-[10px] border border-white/10 bg-elevation-2 p-1 text-[13px] text-text-primary shadow-[0_10px_60px_0_rgba(0,0,0,0.4)]',
         // Entrance: fade + subtle scale from Radix's transform origin (@starting-style)
         'origin-[var(--radix-dropdown-menu-content-transform-origin)] transition-[opacity,scale] duration-150 ease-out starting:scale-95 starting:opacity-0',
         className

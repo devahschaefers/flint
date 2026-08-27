@@ -1,6 +1,7 @@
 import { Bell, CalendarDays, Check, ChevronRight, Users, type LucideIcon } from 'lucide-react'
 import { CATEGORY_LABELS, type Category, type Email, type Sender } from '../../data/types'
 import { cn } from '../../lib/utils'
+import { useAppStore } from '../../store'
 
 interface GroupRowProps {
   category: Category
@@ -36,6 +37,7 @@ function senderChips(emails: Email[]): Chip[] {
 }
 
 export default function GroupRow({ category, emails, onOpen }: GroupRowProps): React.JSX.Element {
+  const markDone = useAppStore((s) => s.markDone)
   const { chip, icon, Icon } = CATEGORY_STYLES[category]
   const hasUnread = emails.some((e) => !e.read)
   const chips = senderChips(emails)
@@ -49,7 +51,15 @@ export default function GroupRow({ category, emails, onOpen }: GroupRowProps): R
       )}
     >
       <span className="absolute left-[10px] flex items-center gap-[7px]">
-        <span className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted opacity-0 group-hover:opacity-100">
+        <span
+          role="button"
+          title="Mark all done"
+          onClick={(e) => {
+            e.stopPropagation()
+            markDone(emails.map((email) => email.id))
+          }}
+          className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted opacity-0 hover:border-text-secondary group-hover:opacity-100"
+        >
           <Check size={11} className="text-text-muted" />
         </span>
         {hasUnread && <span className="h-2 w-2 rounded-full bg-blue-3" />}

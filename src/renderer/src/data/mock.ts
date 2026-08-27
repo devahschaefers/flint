@@ -1216,6 +1216,17 @@ const kclNomination = drafts.find(
 if (kclNomination) pinnedPicks.add(kclNomination)
 for (const d of pinnedPicks) d.pinned = true
 
+// About 12 older, read inbox emails start done (archived) so the Archive list
+// and the show-done toggle have content. Picked by stepping through the sorted
+// stream (no faker) so the seeded sequence above is untouched.
+const donePicks = new Set<Draft>()
+const doneCandidates = drafts.filter(
+  (d) => d.folder === 'inbox' && d.read && d.dayIndex >= 3 && !d.pinned && !d.important
+)
+for (let i = 0; i < doneCandidates.length && donePicks.size < 12; i += 7) {
+  donePicks.add(doneCandidates[i])
+}
+
 export const emails: Email[] = drafts.map((d, i) => ({
   id: `email-${String(i + 1).padStart(3, '0')}`,
   accountId: d.accountId,
@@ -1228,5 +1239,110 @@ export const emails: Email[] = drafts.map((d, i) => ({
   read: d.read,
   important: d.important,
   pinned: d.pinned,
-  folder: d.folder
+  folder: d.folder,
+  done: donePicks.has(d),
+  replies: []
 }))
+
+// ---------------------------------------------------------------------------
+// Live "just arrived" emails for the refresh action. Plain rotation keyed by
+// existingCount — no faker at call time, so the seeded stream stays stable.
+// ---------------------------------------------------------------------------
+
+interface IncomingTemplate {
+  sender: Sender
+  accountId: string
+  category: Category
+  subject: string
+  body: string[]
+}
+
+const INCOMING_TEMPLATES: IncomingTemplate[] = [
+  {
+    sender: makeSender('Piazza', 'no-reply@piazza.com'),
+    accountId: 'berkeley',
+    category: 'notifications',
+    subject: 'Your post has 1 new reply',
+    body: [
+      "Your question 'Does the greedy exchange argument need to cover ties?' in EECS 101 has a new reply.",
+      "The reply reads: 'Following up on the instructor answer — the WLOG route is shorter if you fix the ordering up front. I wrote mine that way and it came out to half a page.'",
+      'Reply directly from Piazza to continue the discussion.'
+    ]
+  },
+  {
+    sender: makeSender('GitHub', 'notifications@github.com'),
+    accountId: 'gmail',
+    category: 'notifications',
+    subject: '[cs164-project] alexwang requested your review on #47',
+    body: [
+      "alexwang requested your review on pull request #47: Add constant folding pass. 'Small one — mostly tests. Want your eyes on the overflow handling before I merge.'",
+      "From the PR description: 'Folds integer arithmetic on literals at parse time. Overflow falls back to leaving the expression unfolded rather than wrapping, so runtime behavior is unchanged.'",
+      '4 files changed, +186 -12. CI is green.'
+    ]
+  },
+  {
+    sender: makeSender('Jordan Reyes', 'jordan.reyes@berkeley.edu'),
+    accountId: 'berkeley',
+    category: 'people',
+    subject: 'you around?',
+    body: [
+      "are you in Soda rn? I'm on the 3rd floor and the HW3 autograder just reopened — it's accepting the powers-of-two assumption now, so my part (c) finally passes.",
+      'come find me if you want to rerun yours before the queue gets long. also I have your pen.'
+    ]
+  },
+  {
+    sender: makeSender('Berkeley Study Abroad - UCEAP', 'studyabroad@berkeley.edu'),
+    accountId: 'berkeley',
+    category: 'notifications',
+    subject: 'Reminder: visa appointment documentation due this week',
+    body: [
+      'Dear Devah, This is a reminder that your UK Student visa appointment confirmation and supporting documentation are due in your UCEAP Portal by Friday at 5:00 PM.',
+      'Upload a copy of your appointment confirmation email and your CAS statement to the Documents tab. Items are reviewed within two business days.',
+      'If you have not yet booked an appointment, the San Francisco application centre is currently booking about three weeks out — schedule as soon as possible.'
+    ]
+  },
+  {
+    sender: makeSender('Canvas | bCourses', 'notifications@instructure.com'),
+    accountId: 'berkeley',
+    category: 'notifications',
+    subject: 'Assignment graded: Lab 4 - Sampling Distributions',
+    body: [
+      "Your assignment Lab 4 - Sampling Distributions in CDSS 101 has been graded. Score: 19/20. Instructor comment: 'Clean bootstrap implementation — nice catch on the resampling footnote.'",
+      'The hidden tests all passed; the one-point deduction is on the written interpretation question. Class median: 16.',
+      'Regrade requests are open for 7 days via Gradescope.'
+    ]
+  },
+  {
+    sender: makeSender('Sarah Kim', 'sarahkim.cal@gmail.com'),
+    accountId: 'gmail',
+    category: 'people',
+    subject: 'friday headcount',
+    body: [
+      "Update on Thai Friday: Marcus escaped his section, so we're six now. I moved the reservation to 7:15 so we actually get the big table.",
+      "Also we're doing a group gift situation for your going-away — I'm telling you now so you act surprised competently. You didn't hear it from me."
+    ]
+  }
+]
+
+let incomingSeq = 0
+
+/** A fresh unread inbox email dated now; rotation by existingCount keeps it faker-free. */
+export function makeIncomingEmail(existingCount: number): Email {
+  const t = INCOMING_TEMPLATES[existingCount % INCOMING_TEMPLATES.length]
+  return {
+    id: `email-incoming-${++incomingSeq}-${Date.now()}`,
+    accountId: t.accountId,
+    sender: t.sender,
+    subject: t.subject,
+    preview: previewOf(t.body),
+    body: t.body,
+    date: new Date().toISOString(),
+    category: t.category,
+    read: false,
+    important: false,
+    pinned: false,
+    folder: 'inbox',
+    done: false,
+    replies: []
+  }
+}

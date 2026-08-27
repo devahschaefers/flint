@@ -16,10 +16,16 @@ export interface Sender {
   initials: string
 }
 
+export interface EmailReply {
+  /** ISO timestamp */
+  date: string
+  body: string[]
+}
+
 export interface Email {
   id: string
   accountId: string
-  /** For sent mail this is the recipient (what the list row should display) */
+  /** For sent mail and drafts this is the recipient (what the list row should display) */
   sender: Sender
   subject: string
   preview: string
@@ -33,6 +39,10 @@ export interface Email {
   important: boolean
   pinned: boolean
   folder: Folder
+  /** Done = archived: hidden from lists unless "show done" is on; lives in the Archive list */
+  done: boolean
+  /** Replies Devah has sent on this thread, rendered below the body */
+  replies: EmailReply[]
 }
 
 export const CATEGORY_LABELS: Record<Category, string> = {

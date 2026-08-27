@@ -1,9 +1,9 @@
 import { motion } from 'motion/react'
-import { Check, PenLine, Search } from 'lucide-react'
 import DateSection from '../components/inbox/DateSection'
 import EmailRow from '../components/inbox/EmailRow'
+import HeaderControls from '../components/inbox/HeaderControls'
 import { groupByBucket } from '../lib/dates'
-import { filterByAccount, useAppStore, type FolderView } from '../store'
+import { filterByAccount, useAppStore, visibleEmails, type FolderView } from '../store'
 import type { Email } from '../data/types'
 import { cn } from '../lib/utils'
 
@@ -12,7 +12,8 @@ const FOLDER_TITLES: Record<FolderView, string> = {
   drafts: 'Drafts',
   sent: 'Sent',
   trash: 'Trash',
-  spam: 'Spam'
+  spam: 'Spam',
+  archive: 'Archive'
 }
 
 interface FolderListViewProps {
@@ -22,12 +23,18 @@ interface FolderListViewProps {
 export default function FolderListView({ folder }: FolderListViewProps): React.JSX.Element {
   const emails = useAppStore((s) => s.emails)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
+  const hideDone = useAppStore((s) => s.hideDone)
   const openEmail = useAppStore((s) => s.openEmail)
+  const openCompose = useAppStore((s) => s.openCompose)
 
   const title = FOLDER_TITLES[folder]
-  const list = filterByAccount(emails, activeAccountId)
-    .filter((e) => (folder === 'pins' ? e.pinned && e.folder === 'inbox' : e.folder === folder))
-    .sort((a: Email, b: Email) => b.date.localeCompare(a.date))
+  const list = (
+    folder === 'archive'
+      ? filterByAccount(emails, activeAccountId).filter((e) => e.done)
+      : visibleEmails(emails, activeAccountId, hideDone).filter((e) =>
+          folder === 'pins' ? e.pinned && e.folder === 'inbox' : e.folder === folder
+        )
+  ).sort((a: Email, b: Email) => b.date.localeCompare(a.date))
   const buckets = groupByBucket(list, (e) => e.date)
 
   return (
@@ -42,22 +49,7 @@ export default function FolderListView({ folder }: FolderListViewProps): React.J
           <span className="text-[15px] font-semibold text-text-primary">{title}</span>
         </div>
 
-        <div className="no-drag flex items-center gap-4 text-text-bright">
-          <button
-            aria-label="Hide done emails"
-            className="flex h-[18px] w-[34px] items-center rounded-full bg-elevation-3 px-[2px]"
-          >
-            <span className="flex h-[14px] w-[14px] items-center justify-center rounded-full bg-white">
-              <Check size={9} strokeWidth={3.5} className="text-elevation-0" />
-            </span>
-          </button>
-          <button aria-label="Search" className="transition-colors hover:text-ink">
-            <Search size={19} />
-          </button>
-          <button aria-label="Compose" className="transition-colors hover:text-ink">
-            <PenLine size={19} />
-          </button>
-        </div>
+        <HeaderControls showDoneToggle={folder !== 'archive'} />
       </div>
 
       <div className="flex-1 overflow-y-auto px-[30px] pb-6">
@@ -73,7 +65,13 @@ export default function FolderListView({ folder }: FolderListViewProps): React.J
                 className={cn('pl-[10px] mb-1.5', i === 0 ? 'mt-2' : 'mt-5')}
               />
               {items.map((email) => (
-                <EmailRow key={email.id} email={email} onClick={() => openEmail(email.id)} />
+                <EmailRow
+                  key={email.id}
+                  email={email}
+                  onClick={() =>
+                    email.folder === 'drafts' ? openCompose(email.id) : openEmail(email.id)
+                  }
+                />
               ))}
             </div>
           ))
