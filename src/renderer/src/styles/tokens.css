@@ -1,0 +1,76 @@
+@import 'tailwindcss';
+
+/*
+ * Spark Desktop design tokens, extracted from the real app (v3.30.8) via CDP.
+ * Naming mirrors Spark's own variables (elevation scale, gray ramp, blue ramp).
+ */
+@theme {
+  --font-sans: 'Inter', -apple-system, system-ui, 'Segoe UI', sans-serif;
+
+  /* Dark elevation scale */
+  --color-elevation-0: #1f2124;
+  --color-elevation-1: #282a2e;
+  --color-elevation-2: #2f3237;
+  --color-elevation-3: #393e47;
+  --color-elevation-4: #41464e;
+
+  /* Text */
+  --color-ink: #ffffff;
+  --color-text-primary: #dee3eb;
+  --color-text-secondary: #868d97;
+  --color-text-muted: #66707e;
+  --color-text-bright: #aeb8c5;
+
+  /* Blue ramp */
+  --color-blue-0: #193350;
+  --color-blue-1: #163c66;
+  --color-blue-2: #0c58a7;
+  --color-blue-3: #1788ff;
+  --color-blue-4: #0070e5;
+  --color-blue-5: #0053cf;
+  --color-accent: #0070e5;
+
+  /* Status colors */
+  --color-red-3: #e55c5c;
+  --color-green-3: #42be20;
+  --color-yellow-3: #ffaa3b;
+  --color-purple-3: #a06ad0;
+
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Non-utility tokens */
+:root {
+  /* AI ask-bar gradient ring (Spark's --gradient-border-colors) */
+  --gradient-border-colors: linear-gradient(
+    91deg,
+    rgba(70, 162, 255, 0.3) 0%,
+    rgba(140, 138, 255, 0.3) 49.52%,
+    rgba(180, 113, 250, 0.3) 100%
+  );
+  --sidebar-margin-left: 21px;
+  --rail-width: 72px;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-elevation-0 text-ink font-sans antialiased;
+  font-size: 16px;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+/* The window has no title bar; let empty regions drag it like real Spark */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
