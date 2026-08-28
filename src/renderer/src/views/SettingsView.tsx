@@ -1,6 +1,7 @@
 import { motion } from 'motion/react'
 import { ArrowLeft, Check } from 'lucide-react'
 import { accounts } from '../data/mock'
+import { resolveMailbox } from '../lib/identity'
 import { useAppStore } from '../store'
 import { cn } from '../lib/utils'
 
@@ -28,12 +29,20 @@ function Section({ label, children }: SectionProps): React.JSX.Element {
   )
 }
 
+const CONTACTS_SHOWN = 8
+
 export default function SettingsView(): React.JSX.Element {
   const back = useAppStore((s) => s.back)
   const hideDone = useAppStore((s) => s.hideDone)
   const toggleHideDone = useAppStore((s) => s.toggleHideDone)
   const signature = useAppStore((s) => s.signature)
   const setSignature = useAppStore((s) => s.setSignature)
+  const contacts = useAppStore((s) => s.contacts)
+
+  // Collected (auto-learned) contacts sort first so they are visible despite the cap
+  const shownContacts = [...contacts]
+    .sort((a, b) => (a.source === 'collected' ? -1 : 0) - (b.source === 'collected' ? -1 : 0))
+    .slice(0, CONTACTS_SHOWN)
 
   return (
     <motion.div
@@ -67,9 +76,39 @@ export default function SettingsView(): React.JSX.Element {
                   {initialsOf(account.name)}
                 </span>
                 <span className="text-[13px] text-text-primary">{account.name}</span>
-                <span className="ml-auto text-[12px] text-text-secondary">{account.email}</span>
+                <span className="ml-auto text-[12px] text-text-secondary">
+                  {account.identity.address}
+                </span>
               </div>
             ))}
+          </Section>
+
+          <Section label="Contacts">
+            {shownContacts.map((contact) => {
+              const resolved = resolveMailbox({ address: contact.address }, contacts)
+              return (
+                <div key={contact.address} className="flex h-12 items-center gap-3 px-4">
+                  <span
+                    className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                    style={{ backgroundColor: resolved.color }}
+                  >
+                    {resolved.initials}
+                  </span>
+                  <span className="truncate text-[13px] text-text-primary">{contact.name}</span>
+                  {contact.source === 'collected' && (
+                    <span className="shrink-0 text-[10px] text-text-muted">auto</span>
+                  )}
+                  <span className="ml-auto truncate text-[12px] text-text-secondary">
+                    {contact.address}
+                  </span>
+                </div>
+              )
+            })}
+            {contacts.length > shownContacts.length && (
+              <div className="flex h-9 items-center px-4 text-[11px] text-text-muted">
+                {contacts.length} contacts
+              </div>
+            )}
           </Section>
 
           <Section label="Preferences">

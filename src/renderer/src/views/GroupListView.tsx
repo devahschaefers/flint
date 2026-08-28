@@ -1,11 +1,13 @@
+import { useMemo } from 'react'
 import { motion } from 'motion/react'
 import { ArrowLeft, Check } from 'lucide-react'
 import DateSection from '../components/inbox/DateSection'
-import EmailRow from '../components/inbox/EmailRow'
+import ThreadRow from '../components/inbox/ThreadRow'
 import HeaderControls from '../components/inbox/HeaderControls'
 import { groupByBucket } from '../lib/dates'
-import { useAppStore, visibleEmails } from '../store'
-import { CATEGORY_LABELS, type Category, type Email } from '../data/types'
+import { buildThreads, inboxThreads } from '../lib/threads'
+import { filterByAccount, useAppStore } from '../store'
+import { CATEGORY_LABELS, type Category } from '../data/types'
 import { cn } from '../lib/utils'
 
 interface GroupListViewProps {
@@ -13,17 +15,21 @@ interface GroupListViewProps {
 }
 
 export default function GroupListView({ category }: GroupListViewProps): React.JSX.Element {
-  const emails = useAppStore((s) => s.emails)
+  const messages = useAppStore((s) => s.messages)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const hideDone = useAppStore((s) => s.hideDone)
-  const openEmail = useAppStore((s) => s.openEmail)
+  const openThread = useAppStore((s) => s.openThread)
   const back = useAppStore((s) => s.back)
-  const markDone = useAppStore((s) => s.markDone)
+  const archiveThreads = useAppStore((s) => s.archiveThreads)
 
-  const list = visibleEmails(emails, activeAccountId, hideDone)
-    .filter((e) => e.folder === 'inbox' && e.category === category && !e.important)
-    .sort((a: Email, b: Email) => b.date.localeCompare(a.date))
-  const buckets = groupByBucket(list, (e) => e.date)
+  const threads = useMemo(
+    () => buildThreads(filterByAccount(messages, activeAccountId)),
+    [messages, activeAccountId]
+  )
+  const list = inboxThreads(threads, !hideDone).filter(
+    (t) => t.category === category && !t.important
+  )
+  const buckets = groupByBucket(list, (t) => t.latest.date)
 
   return (
     <motion.div
@@ -45,7 +51,7 @@ export default function GroupListView({ category }: GroupListViewProps): React.J
           <button
             aria-label="Mark all done"
             title="Mark all done"
-            onClick={() => markDone(list.map((e) => e.id))}
+            onClick={() => archiveThreads(list.map((t) => t.id))}
             className="flex h-[28px] w-[34px] items-center justify-center rounded-r-[8px] bg-elevation-2 text-text-bright transition-colors hover:text-ink"
           >
             <Check size={15} />
@@ -72,8 +78,8 @@ export default function GroupListView({ category }: GroupListViewProps): React.J
                 label={bucket}
                 className={cn('pl-[10px] mb-1.5', i === 0 ? 'mt-2' : 'mt-5')}
               />
-              {items.map((email) => (
-                <EmailRow key={email.id} email={email} onClick={() => openEmail(email.id)} />
+              {items.map((thread) => (
+                <ThreadRow key={thread.id} thread={thread} onClick={() => openThread(thread.id)} />
               ))}
             </div>
           ))

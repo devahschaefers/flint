@@ -1,58 +1,824 @@
 import { faker } from '@faker-js/faker'
-import type { Account, Category, Email, Folder, Sender } from './types'
+import type { Account, Category, Contact, Folder, Mailbox, Message } from './types'
+
+/**
+ * Seeded mock mailbox built on real email primitives: RFC 5322 headers,
+ * Message-ID / In-Reply-To / References chains, IMAP-style flags and folders.
+ * Threads are never stored — they fall out of the reference chains at runtime.
+ */
 
 faker.seed(1337)
 
 export const accounts: Account[] = [
-  { id: 'gmail', name: 'Gmail', email: 'devah.schaefers@gmail.com', color: '#EA4335' },
-  { id: 'college', name: 'College', email: 'dschaefers@college.edu', color: '#00897B' },
-  { id: 'berkeley', name: 'Berkeley', email: 'devah@berkeley.edu', color: '#7B1FA2' },
-  { id: 'icloud', name: 'iCloud', email: 'devah@icloud.com', color: '#5C6BC0' },
-  { id: 'abundant', name: 'Abundant', email: 'devah@abundant.io', color: '#C2185B' }
+  {
+    id: 'gmail',
+    name: 'Gmail',
+    identity: { name: 'Devah Schaefers', address: 'devah.schaefers@gmail.com' },
+    color: '#EA4335'
+  },
+  {
+    id: 'college',
+    name: 'College',
+    identity: { name: 'Devah Schaefers', address: 'dschaefers@college.edu' },
+    color: '#00897B'
+  },
+  {
+    id: 'berkeley',
+    name: 'Berkeley',
+    identity: { name: 'Devah Schaefers', address: 'devah@berkeley.edu' },
+    color: '#7B1FA2'
+  },
+  {
+    id: 'icloud',
+    name: 'iCloud',
+    identity: { name: 'Devah Schaefers', address: 'devah@icloud.com' },
+    color: '#5C6BC0'
+  },
+  {
+    id: 'abundant',
+    name: 'Abundant',
+    identity: { name: 'Devah Schaefers', address: 'devah@abundant.io' },
+    color: '#C2185B'
+  }
 ]
 
-// Spark avatar palette; color is stable per sender name.
-const AVATAR_PALETTE = [
-  '#6623FF',
-  '#2196F3',
-  '#EC00AF',
-  '#C56BDA',
-  '#43A047',
-  '#FF7043',
-  '#0288D1',
-  '#7B1FA2',
-  '#00897B',
-  '#5C6BC0',
-  '#D81B60',
-  '#F4511E'
+function identityOf(accountId: string): Mailbox {
+  const account = accounts.find((a) => a.id === accountId) ?? accounts[0]
+  return account.identity
+}
+
+// ---------------------------------------------------------------------------
+// The recurring cast. Contacts are the address book (contact name wins over the
+// header display name — Mom's mail arrives as "Linda Schaefers" but shows as
+// "Mom"). Institutional senders are deliberately NOT contacts: their names ride
+// on each message's From header, like real mailing lists.
+// ---------------------------------------------------------------------------
+
+export const seedContacts: Contact[] = [
+  { address: 'linda.schaefers@comcast.net', name: 'Mom', source: 'seed' },
+  { address: 'gary.schaefers@comcast.net', name: 'Dad', source: 'seed' },
+  { address: 'carol.hutchins@gmail.com', name: 'Aunt Carol', source: 'seed' },
+  { address: 'priya.raghavan@kcl.ac.uk', name: 'Priya Raghavan', source: 'seed' },
+  { address: 'jan.armstrong@berkeley.edu', name: 'Jan Armstrong', source: 'seed' },
+  { address: 'dortha.koss@berkeley.edu', name: 'Dortha Koss', source: 'seed' },
+  { address: 'ranade@eecs.berkeley.edu', name: 'Prof. Ranade', source: 'seed' },
+  { address: 'mokhtari@stat.berkeley.edu', name: 'Prof. Elena Mokhtari', source: 'seed' },
+  { address: 'sarahkim.cal@gmail.com', name: 'Sarah Kim', source: 'seed' },
+  { address: 'jordan.reyes@berkeley.edu', name: 'Jordan Reyes', source: 'seed' },
+  { address: 'alex.wang@berkeley.edu', name: 'Alex Wang', source: 'seed' },
+  { address: 'tessa.liang@gmail.com', name: 'Tessa Liang', source: 'seed' },
+  { address: 'noah.petersen@gmail.com', name: 'Noah Petersen', source: 'seed' },
+  { address: 'elena.marsh@gmail.com', name: 'Elena Marsh', source: 'seed' },
+  { address: 'hana.suzuki@berkeley.edu', name: 'Hana Suzuki', source: 'seed' },
+  { address: 'owen.blackwell@berkeley.edu', name: 'Owen Blackwell', source: 'seed' },
+  { address: 'marcus.bell@berkeley.edu', name: 'Marcus Bell', source: 'seed' },
+  { address: 'maya.flores@berkeley.edu', name: 'Maya Flores', source: 'seed' },
+  { address: 'leo.tran@berkeley.edu', name: 'Leo Tran', source: 'seed' },
+  { address: 'amara.diallo@berkeley.edu', name: 'Amara Diallo', source: 'seed' },
+  { address: 'felix.nguyen@gmail.com', name: 'Felix Nguyen', source: 'seed' },
+  { address: 'ines.castillo@berkeley.edu', name: 'Ines Castillo', source: 'seed' },
+  { address: 'tom.okafor@berkeley.edu', name: 'Tom Okafor', source: 'seed' },
+  { address: 'ruth.landau@berkeley.edu', name: 'Ruth Landau', source: 'seed' },
+  { address: 'peter.quist@abundant.io', name: 'Peter Quist', source: 'seed' }
 ]
 
-function avatarColor(name: string): string {
-  let hash = 0
-  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0
-  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length]
+// Mom's header name differs from her contact name on purpose (contact wins).
+const MOM: Mailbox = { name: 'Linda Schaefers', address: 'linda.schaefers@comcast.net' }
+const PRIYA: Mailbox = { name: 'Priya Raghavan', address: 'priya.raghavan@kcl.ac.uk' }
+const JAN: Mailbox = { name: 'Jan Armstrong', address: 'jan.armstrong@berkeley.edu' }
+const DORTHA: Mailbox = { name: 'Dortha Koss', address: 'dortha.koss@berkeley.edu' }
+const RANADE: Mailbox = { name: 'Gita Ranade', address: 'ranade@eecs.berkeley.edu' }
+const SARAH: Mailbox = { name: 'Sarah Kim', address: 'sarahkim.cal@gmail.com' }
+// Jordan writes from a client that sends no display name; the contact resolves it.
+const JORDAN: Mailbox = { address: 'jordan.reyes@berkeley.edu' }
+const ALEX: Mailbox = { name: 'Alex Wang', address: 'alex.wang@berkeley.edu' }
+const TESSA: Mailbox = { name: 'Tessa Liang', address: 'tessa.liang@gmail.com' }
+const NOAH: Mailbox = { name: 'Noah Petersen', address: 'noah.petersen@gmail.com' }
+const ELENA: Mailbox = { name: 'Elena Marsh', address: 'elena.marsh@gmail.com' }
+const HANA: Mailbox = { name: 'Hana Suzuki', address: 'hana.suzuki@berkeley.edu' }
+const OWEN: Mailbox = { name: 'Owen Blackwell', address: 'owen.blackwell@berkeley.edu' }
+const FELIX: Mailbox = { name: 'Felix Nguyen', address: 'felix.nguyen@gmail.com' }
+
+/**
+ * Senders for the generated people stream. Includes contacts (some sending
+ * without a display name), named non-contacts (header name renders), and 2-3
+ * bare non-contacts that must render as raw addresses, Gmail-style.
+ */
+const PEOPLE_POOL: Mailbox[] = [
+  JAN,
+  DORTHA,
+  SARAH,
+  JORDAN,
+  ALEX,
+  { name: 'Maya Flores', address: 'maya.flores@berkeley.edu' },
+  { name: 'Leo Tran', address: 'leo.tran@berkeley.edu' },
+  { name: 'Amara Diallo', address: 'amara.diallo@berkeley.edu' },
+  FELIX,
+  { name: 'Ines Castillo', address: 'ines.castillo@berkeley.edu' },
+  { name: 'Tom Okafor', address: 'tom.okafor@berkeley.edu' },
+  { name: 'Ruth Landau', address: 'ruth.landau@berkeley.edu' },
+  { name: 'Marcus Bell', address: 'marcus.bell@berkeley.edu' },
+  HANA,
+  OWEN,
+  NOAH,
+  TESSA,
+  ELENA,
+  { name: 'Peter Quist', address: 'peter.quist@abundant.io' },
+  { name: 'Becca Ellison', address: 'becca.ellison@gmail.com' }, // named, no contact
+  { name: 'Theo Lindqvist', address: 'theo.lindqvist@gmail.com' }, // named, no contact
+  { address: 'mkoslowski@ocf.berkeley.edu' }, // bare address, no contact
+  { address: 'd.hutch04@gmail.com' }, // bare address, no contact
+  { address: 'zoe.trann@yahoo.com' } // bare address, no contact
+]
+
+const NAMED_POOL: Mailbox[] = PEOPLE_POOL.filter((p) => p.name !== undefined)
+
+// ---------------------------------------------------------------------------
+// Message construction. Every seeded message gets a unique Message-ID under
+// the sender's own domain; reply chains are built with a helper that mirrors
+// the store's sendReply semantics (references grow, parents get \Answered).
+// ---------------------------------------------------------------------------
+
+const MINUTE = 60 * 1000
+const DAY = 24 * 60 * MINUTE
+const NOW = Date.now()
+
+let seedSeq = 0
+function seedId(fromAddress: string): string {
+  seedSeq += 1
+  return `<seed-${seedSeq}@${fromAddress.split('@')[1]}>`
 }
 
-function initialsOf(name: string): string {
-  const words = name.split(/\s+/).filter((w) => /[a-z]/i.test(w))
-  return words
-    .slice(0, 2)
-    .map((w) => w.replace(/[^a-z]/gi, '').charAt(0).toUpperCase())
-    .join('')
+const built: Message[] = []
+
+interface MessageInput {
+  from: Mailbox
+  to: Mailbox[]
+  cc?: Mailbox[]
+  replyTo?: Mailbox
+  subject: string
+  /** epoch ms */
+  date: number
+  body: string[]
+  accountId: string
+  folder?: Folder
+  seen?: boolean
+  flagged?: boolean
+  answered?: boolean
+  inReplyTo?: string
+  references?: string[]
+  category?: Category
 }
 
-function makeSender(name: string, email: string): Sender {
-  return { name, email, color: avatarColor(name), initials: initialsOf(name) }
+function push(input: MessageInput): Message {
+  const message: Message = {
+    messageId: seedId(input.from.address),
+    inReplyTo: input.inReplyTo,
+    references: input.references ?? [],
+    from: input.from,
+    to: input.to,
+    cc: input.cc ?? [],
+    replyTo: input.replyTo,
+    subject: input.subject,
+    date: new Date(input.date).toISOString(),
+    body: input.body,
+    accountId: input.accountId,
+    folder: input.folder ?? 'inbox',
+    flags: {
+      seen: input.seen ?? true,
+      flagged: input.flagged ?? false,
+      answered: input.answered ?? false
+    },
+    category: input.category ?? 'people',
+    important: false
+  }
+  built.push(message)
+  return message
 }
 
-/** First ~140 chars of body[0], cut at a word boundary, so previews always agree with the message. */
-function previewOf(body: string[]): string {
-  const first = body[0]
-  if (first.length <= 140) return first
-  const cut = first.slice(0, 140)
-  const lastSpace = cut.lastIndexOf(' ')
-  return `${cut.slice(0, lastSpace > 0 ? lastSpace : 140)}…`
+interface ReplyInput {
+  date: number
+  body: string[]
+  accountId: string
+  folder: Folder
+  seen?: boolean
+  to?: Mailbox[]
+  cc?: Mailbox[]
 }
+
+/** Append a reply to `parent`: chains references; our replies mark the parent \Answered. */
+function makeReply(parent: Message, from: Mailbox, input: ReplyInput): Message {
+  const isOwn = accounts.some((a) => a.identity.address === from.address)
+  if (isOwn) parent.flags.answered = true
+  return push({
+    from,
+    to: input.to ?? (isOwn ? [parent.replyTo ?? parent.from] : [identityOf(input.accountId)]),
+    cc: input.cc,
+    subject: /^re:/i.test(parent.subject) ? parent.subject : `Re: ${parent.subject}`,
+    date: input.date,
+    body: input.body,
+    accountId: input.accountId,
+    folder: input.folder,
+    seen: input.seen,
+    inReplyTo: parent.messageId,
+    references: [...parent.references, parent.messageId],
+    category: parent.category
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Hand-written conversations: real multi-message threads with proper
+// In-Reply-To/References chains, sent replies from the account identities, and
+// \Answered on the messages Devah replied to.
+// ---------------------------------------------------------------------------
+
+// Study group: incoming → our reply → fresh unread follow-up referencing both.
+const studyM1 = push({
+  from: JAN,
+  to: [identityOf('berkeley')],
+  subject: 'study group this weekend',
+  date: NOW - 1.1 * DAY,
+  body: [
+    'A few of us want to grind through HW3 before the midterm — are you free Saturday afternoon? I can book a Moffitt room if people commit today.',
+    "Bring whatever you have for part (c). Nobody I've talked to has it working, which is either comforting or very bad news.",
+    'Jan'
+  ],
+  accountId: 'berkeley'
+})
+const studyM2 = makeReply(studyM1, identityOf('berkeley'), {
+  date: NOW - 0.6 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  body: [
+    "Saturday at 2 works — see you on the Moffitt 4th floor. I'll bring my HW3 attempt: parts (a) and (b) are done, plus a graveyard of failed ideas for (c).",
+    "Can we also spend 20 minutes on the exchange argument before we start? I think I finally get the tie-breaking case, and explaining it out loud will tell me whether that's actually true.",
+    'Devah'
+  ]
+})
+makeReply(studyM2, JAN, {
+  date: NOW - 0.15 * DAY,
+  folder: 'inbox',
+  accountId: 'berkeley',
+  seen: false,
+  body: [
+    "Room's booked — Moffitt 405, under my name, 2 to 5. Six of us so far.",
+    'Also the GSI just posted a hint on Q4(c) that basically hands you the invariant. Reading it now; I will summarize for the group so nobody has to admit how long we all stared at it.',
+    'Jan'
+  ]
+})
+
+// Mom: contact name "Mom" beats her "Linda Schaefers" header name. Flagged thread.
+const momM1 = push({
+  from: MOM,
+  to: [identityOf('gmail')],
+  subject: 'checking in',
+  date: NOW - 1.6 * DAY,
+  flagged: true,
+  body: [
+    "Hi sweetheart, Dad and I were talking about your London plans last night. Have you heard back about housing yet? Grandma wants to know if you'll be home for Thanksgiving before you go.",
+    'Also your cousin Emma got into Michigan, so expect a call from Aunt Carol about it. Act surprised.',
+    'Eat something green this week. Love, Mom'
+  ],
+  accountId: 'gmail'
+})
+const momM2 = makeReply(momM1, identityOf('gmail'), {
+  date: NOW - 1.2 * DAY,
+  folder: 'sent',
+  accountId: 'gmail',
+  body: [
+    "Hi Mom, good news — housing came through this morning. I got a spot at Stamford Street, the one eight minutes from campus. It's an ensuite, so you can officially stop worrying about the shared bathroom thing.",
+    "Yes to Thanksgiving — I land the Tuesday before. And I'll call Grandma this Sunday, I promise. Tell her to take her phone off silent this time.",
+    'Love, Devah'
+  ]
+})
+makeReply(momM2, MOM, {
+  date: NOW - 0.45 * DAY,
+  folder: 'inbox',
+  accountId: 'gmail',
+  seen: false,
+  body: [
+    'Stamford Street! Wonderful, sweetheart. Dad already found it on the map and measured the walk to campus, because of course he did. Eight minutes, he confirms.',
+    "Grandma has been told to expect your call Sunday and has already told her book club. No pressure. Love, Mom"
+  ]
+})
+
+// Discussion notes trade with Dortha.
+const notesM1 = push({
+  from: DORTHA,
+  to: [identityOf('berkeley')],
+  subject: "Notes from today's discussion",
+  date: NOW - 2.5 * DAY,
+  body: [
+    'Hey Devah, here are my notes from discussion today. I flagged the part about exchange arguments since the GSI hinted it shows up on the midterm.',
+    "The worked example on slide 14 is the one he called 'exam-adjacent', so I typed that one up in full. My handwriting on the proof sketch got bad toward the end — ping me if a step doesn't make sense.",
+    "Doc is in our shared folder under 'disc-week4'."
+  ],
+  accountId: 'berkeley'
+})
+const notesM2 = makeReply(notesM1, identityOf('berkeley'), {
+  date: NOW - 2.1 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  body: [
+    'You are genuinely a lifesaver — the slide 14 writeup is clearer than the actual lecture. I added my solutions for the practice problems at the bottom of the doc in a different color.',
+    'Trade accepted on the CDSS notes. And no, I have not started the project either. Nine days is basically two weeks if you round up.',
+    'Devah'
+  ]
+})
+makeReply(notesM2, DORTHA, {
+  date: NOW - 1.9 * DAY,
+  folder: 'inbox',
+  accountId: 'berkeley',
+  body: [
+    'Saw your solutions — your Q2 is cleaner than mine, I am stealing the notation. CDSS notes are in the same folder now; the sampling diagrams actually came out legible this time.',
+    "Project status unchanged for both of us, I see. Nine days. It's fine. Everything is fine."
+  ]
+})
+
+// Intro thread: Tessa intros Priya (cc), we reply to Priya, Priya answers twice.
+// Latest counterpart is Priya, so the row reads "Priya Raghavan 4". Flagged.
+const introM1 = push({
+  from: TESSA,
+  to: [identityOf('berkeley')],
+  cc: [PRIYA],
+  subject: 'intro to my friend at KCL',
+  date: NOW - 7.0 * DAY,
+  flagged: true,
+  body: [
+    "Devah — meet Priya, she's a second-year at King's and lived in Stamford Street last year. Priya, Devah's headed to KCL in the spring and has housing questions.",
+    "Priya did the whole Zone 1 versus Zone 2 math last year so you don't have to, and she knows which modules are secretly great. She's also just fun — you two will get along.",
+    "I'll let you two take it from here!"
+  ],
+  accountId: 'berkeley'
+})
+const introM2 = makeReply(introM1, identityOf('berkeley'), {
+  date: NOW - 6.5 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  to: [PRIYA],
+  cc: [TESSA],
+  body: [
+    "Hi Priya, so nice to e-meet you! I just got placed at Stamford Street, which I hear is where you lived — I am very open to a brain dump on anything from laundry logistics to which modules are secretly great.",
+    "No rush at all, but if you're up for a call sometime in the next few weeks I'd love that. Whatever time works with the time difference — my schedule is flexible after 9 AM Pacific.",
+    'Thanks for being up for the intro. Devah'
+  ]
+})
+const introM3 = makeReply(introM2, PRIYA, {
+  date: NOW - 5.8 * DAY,
+  folder: 'inbox',
+  accountId: 'berkeley',
+  body: [
+    "Hi Devah! Congratulations on Stamford Street — genuinely the best decision you didn't know you were making. The laundry room is a social scene, the walk to Strand is nothing, and the corner room on floor 6 has the river view if you get any say in it.",
+    'Happy to do a call — Thursdays after 6 my time are best. Bring housing and module questions, I have opinions about both.',
+    'Priya'
+  ]
+})
+makeReply(introM3, PRIYA, {
+  date: NOW - 0.9 * DAY,
+  folder: 'inbox',
+  accountId: 'berkeley',
+  seen: false,
+  body: [
+    "Also — before I forget, module selection opens next week and the good War Studies seminars fill inside a day. If you want any of them, rank them first, not as reserves.",
+    'Still on for Thursday? I have a lecture until 5:30 but am free after.',
+    'Priya'
+  ]
+})
+
+// Flight logistics with Noah.
+const flightM1 = push({
+  from: NOAH,
+  to: [identityOf('gmail')],
+  subject: 'flight to Heathrow',
+  date: NOW - 4.4 * DAY,
+  body: [
+    'I found a nonstop SFO-LHR on the 8th for $612 if we book by Friday. If we land together we can split the Heathrow Express, or honestly the Piccadilly line is fine.',
+    "The return leg is the annoying part — flying back on a Saturday adds like $150. I say we book the outbound now and sort returns later, since your program end date isn't final anyway.",
+    "Sending you the Google Flights link — fare-lock it if you're not ready to commit."
+  ],
+  accountId: 'gmail'
+})
+const flightM2 = makeReply(flightM1, identityOf('gmail'), {
+  date: NOW - 3.8 * DAY,
+  folder: 'sent',
+  accountId: 'gmail',
+  body: [
+    "Booked! Nonstop on the 8th, seat 34A, $612 exactly as promised. Send me your confirmation number and I'll see about getting us seats together — worst case we bribe whoever has 34B.",
+    'Agreed on skipping the Heathrow Express; the Piccadilly line goes straight to my halls anyway. First pub lunch is on me if you handle the Oyster card logistics.',
+    'Devah'
+  ]
+})
+makeReply(flightM2, NOAH, {
+  date: NOW - 3.2 * DAY,
+  folder: 'inbox',
+  accountId: 'gmail',
+  body: [
+    'Got 34B — no bribery required, the seat map gods provide. Confirmation is QX4LTR if you want to link the bookings.',
+    'I caved and booked the Saturday return anyway; the $150 stung less than a 6 AM Tuesday landing before a Wednesday lecture. You have been warned about my priorities.'
+  ]
+})
+
+// Recommendation letter: a thread ROOTED at our own sent message.
+const recM1 = push({
+  from: identityOf('berkeley'),
+  to: [RANADE],
+  subject: 'Recommendation letter for UCEAP application',
+  date: NOW - 3.6 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  body: [
+    "Dear Professor Ranade, I'm applying to UCEAP's spring program at King's College London and the application asks for one academic reference. Would you be willing to write in support? I took your algorithms course last spring and it's a big part of why I'm pursuing the theory-leaning modules at KCL.",
+    "The letter would be due October 15 through the UCEAP portal. I'm happy to send along anything that would make it easier — resume, transcript, or a reminder of my coursework.",
+    'Thank you for considering it. Devah Schaefers'
+  ]
+})
+const recM2 = makeReply(recM1, RANADE, {
+  date: NOW - 3.3 * DAY,
+  folder: 'inbox',
+  accountId: 'berkeley',
+  body: [
+    "Hi Devah, I'd be glad to write in support of your application. Could you send me your resume, transcript, and a short paragraph on the program by end of next week?",
+    'It also helps if you remind me which assignments from my course you were proudest of — specifics make these letters much stronger than generalities.',
+    'And confirm the deadline for me, please. I want to make sure it goes in well ahead of time.'
+  ]
+})
+makeReply(recM2, identityOf('berkeley'), {
+  date: NOW - 3.0 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  body: [
+    "Thank you so much — this means a lot. I've attached my resume, unofficial transcript, and a paragraph about the KCL program and why I'm applying.",
+    "The assignments I'm proudest of from your course are the scheduling problem on HW2 and my final project on approximation algorithms. Happy to send either writeup if it would help.",
+    'The deadline is October 15 through the UCEAP portal — it should email you a submission link directly. Thanks again, Devah'
+  ]
+})
+
+// Housing shortlist: sent root with one incoming reply.
+const housingM1 = push({
+  from: identityOf('gmail'),
+  to: [ELENA],
+  subject: 'housing in London',
+  date: NOW - 9.5 * DAY,
+  folder: 'sent',
+  accountId: 'gmail',
+  body: [
+    "Halls shortlist, ranked: Stamford Street (eight minutes to campus), Goodenough College (gorgeous, Zone 1, formal dinners??), and a Zone 2 wildcard near the Tube that's £60/week cheaper.",
+    "Thoughts? You're better at this than me and you know I will agonize until someone else decides.",
+    'Devah'
+  ]
+})
+makeReply(housingM1, ELENA, {
+  date: NOW - 8.7 * DAY,
+  folder: 'inbox',
+  accountId: 'gmail',
+  body: [
+    'Ok so I looked at the halls you sent — Stamford Street is way closer to campus but Goodenough College looks amazing. My cousin says Zone 2 is fine if you get a room near the Tube.',
+    "Also apparently Goodenough has a formal dinner thing, which is either amazing or deeply weird and I genuinely can't tell. Stamford Street is like eight minutes to campus though, and you hate commuting.",
+    "Want to just call tonight and go through the options together? I'm free after 8."
+  ]
+})
+
+// CDSS lab debugging with Owen.
+const cdssM1 = push({
+  from: OWEN,
+  to: [identityOf('berkeley')],
+  subject: 'Quick question about the CDSS lab',
+  date: NOW - 10.8 * DAY,
+  body: [
+    "Hey, in lab 4 did your confidence interval come out around (0.42, 0.58)? Mine looks suspicious and I can't tell if I'm bootstrapping wrong or the data is just like that.",
+    'I reran it with 10,000 resamples instead of 1,000 and it barely moved, so now I suspect my cleaning step. Did you drop the null rows before or after splitting?'
+  ],
+  accountId: 'berkeley'
+})
+makeReply(cdssM1, identityOf('berkeley'), {
+  date: NOW - 10.5 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  body: [
+    "Mine came out to (0.44, 0.57), so yours isn't crazy. I dropped the null rows before splitting — the lab spec buries that in a footnote under the second code cell.",
+    "If it still looks off after that, check that you're resampling with replacement. That one cost me an hour.",
+    'Devah'
+  ]
+})
+
+// Sublease: three messages ending in good news.
+const subleaseM1 = push({
+  from: HANA,
+  to: [identityOf('icloud')],
+  subject: 'Spring sublease?',
+  date: NOW - 6.0 * DAY,
+  body: [
+    "Hey! Heard you're going abroad in the spring — are you planning to sublease your room? My friend is transferring in January and needs a place near campus.",
+    "She's clean, quiet, and has a cat (deal-breaker? be honest). She can do $1,100 plus utilities, and the timing lines up with your program almost exactly — January through May.",
+    'No pressure either way, just let me know before you list it anywhere else.'
+  ],
+  accountId: 'icloud'
+})
+const subleaseM2 = makeReply(subleaseM1, identityOf('icloud'), {
+  date: NOW - 5.5 * DAY,
+  folder: 'sent',
+  accountId: 'icloud',
+  body: [
+    "Yes — I'm subleasing January through May and your friend's timing is basically perfect. $1,100 plus utilities works, and the cat is fine as long as she covers anything the cat destroys.",
+    "I'm putting together a short listing with photos this week. I'll send it to you first so she gets first shot before I post it anywhere.",
+    'Devah'
+  ]
+})
+makeReply(subleaseM2, HANA, {
+  date: NOW - 4.9 * DAY,
+  folder: 'inbox',
+  accountId: 'icloud',
+  body: [
+    "She's in!! And she says the cat, quote, 'destroys nothing but expectations.' I'll forward the listing the second you send it — thank you for holding it for her.",
+    'She can do a video call walkthrough whenever, her schedule is flexible until the semester starts.'
+  ]
+})
+
+// Mock interview planning with Alex (also the GitHub PR requester).
+const stripeM1 = push({
+  from: ALEX,
+  to: [identityOf('berkeley')],
+  subject: 'did you see the Stripe posting',
+  date: NOW - 8.9 * DAY,
+  body: [
+    'The Stripe intern posting just went up on Handshake and it closes in two weeks. We should do a mock interview swap before then — are you free Tuesday?',
+    "I can do Tuesday after 4 or Wednesday morning. Let's do one behavioral and one medium problem each, and actually time them this round instead of chatting through the answers."
+  ],
+  accountId: 'berkeley'
+})
+makeReply(stripeM1, identityOf('berkeley'), {
+  date: NOW - 8.4 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  body: [
+    "Tuesday after 4 works. Let's do the full loop: one behavioral, one medium each, actually timed, and no 'wait, let me just finish this thought' at the 35-minute mark. (That one's directed at me, not you.)",
+    "I grabbed a Cory breakout room for 4:15. Bring your question list from last time and I'll bring two new ones from the tagged list.",
+    'Devah'
+  ]
+})
+
+// Lost charger — Jordan sends with no display name; the contact still resolves.
+const chargerM1 = push({
+  from: JORDAN,
+  to: [identityOf('berkeley')],
+  subject: 'you left your charger in Soda',
+  date: NOW - 4.9 * DAY,
+  body: [
+    "pretty sure this is yours — it was on the table in 380 after we left. I'll be in the Woz until 5 if you want to come grab it.",
+    "It's the 96W one with the sticker, so I figured you'd want it back before your laptop dies mid-lecture again."
+  ],
+  accountId: 'berkeley'
+})
+makeReply(chargerM1, identityOf('berkeley'), {
+  date: NOW - 4.5 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  body: [
+    "That's mine, thank you!! I spent twenty minutes this morning convinced I'd left it at V&A. I'll swing by the Woz around 4:30 — if you've left by then, just leave it with whoever's at the front desk.",
+    'I owe you a coffee. Devah'
+  ]
+})
+
+// Dinner plans — the live refresh rotation grows this thread (see below).
+const dinnerM1 = push({
+  from: SARAH,
+  to: [identityOf('gmail')],
+  subject: 'Dinner Friday?',
+  date: NOW - 9.6 * DAY,
+  body: [
+    "We're doing Thai on Telegraph before you disappear to London forever. Friday 7pm, usual spot. Say yes.",
+    "Sarah's in, Marcus is a maybe because of his 6pm section. If we get there before 7 we can actually get the big table in the back."
+  ],
+  accountId: 'gmail'
+})
+const dinnerM2 = makeReply(dinnerM1, identityOf('gmail'), {
+  date: NOW - 9.3 * DAY,
+  folder: 'sent',
+  accountId: 'gmail',
+  body: [
+    "Yes, obviously. I'll be there at 7 sharp, I'm getting the drunken noodles, and you cannot stop me.",
+    "Also, 'before you disappear to London forever' — it's five months. I'll be back before the good weather. Save the guilt trip for my mom, she's better at it.",
+    'Devah'
+  ]
+})
+
+// ---------------------------------------------------------------------------
+// Other hand-written mail: standalone sent, drafts (one a proper reply draft),
+// a couple of standalone inbox pieces, and the spam folder.
+// ---------------------------------------------------------------------------
+
+const UCEAP: Mailbox = { name: 'Berkeley Study Abroad - UCEAP', address: 'studyabroad@berkeley.edu' }
+
+// Standalone sent mail.
+push({
+  from: identityOf('berkeley'),
+  to: [UCEAP],
+  subject: 'Question about my transcript upload',
+  date: NOW - 7.2 * DAY,
+  folder: 'sent',
+  accountId: 'berkeley',
+  category: 'notifications',
+  body: [
+    "Hi, I submitted my Acknowledgement of Nomination last week, but my portal checklist still shows the transcript item as 'in review' after ten days. The confirmation email said reviews take two business days.",
+    'Could you confirm it was received? I want to make sure nothing is holding up my file before the KCL deadline. My student ID is 3036841772.',
+    'Thank you, Devah Schaefers'
+  ]
+})
+push({
+  from: identityOf('icloud'),
+  to: [HANA],
+  subject: 'sublease listing — read this before I post?',
+  date: NOW - 5.2 * DAY,
+  folder: 'sent',
+  accountId: 'icloud',
+  body: [
+    "Can you sanity-check this before I put it up? 'Sunny room in 3BR near North Berkeley BART, Jan-May, $1,100/mo + utilities, furnished, quiet housemates, no smoking.' Does 'quiet housemates' sound like a threat?",
+    'Also: do I mention the kitchen situation, or let them discover the ant thing organically? Kidding. Mostly.',
+    'Devah'
+  ]
+})
+
+// A UCEAP notice we started answering: the reply lives in drafts with a real
+// In-Reply-To chain back to this message.
+const checklistMsg = push({
+  from: UCEAP,
+  to: [identityOf('berkeley')],
+  subject: 'Pre-Departure Checklist: 45 days to go',
+  date: NOW - 2.0 * DAY,
+  accountId: 'berkeley',
+  category: 'notifications',
+  body: [
+    'Dear Devah, Your program start date is approaching. Please review your pre-departure checklist: passport validity, visa appointment, flight itinerary, and proof of insurance are still outstanding.',
+    'Your passport must be valid for at least six months beyond your program end date. UK Student visa appointments at the San Francisco application centre are currently booking about three weeks out, so schedule yours now.',
+    'Upload each document to the portal as you complete it. Items are reviewed within two business days and you will be notified of anything that needs correction.'
+  ]
+})
+push({
+  from: identityOf('berkeley'),
+  to: [UCEAP],
+  subject: 'Re: Pre-Departure Checklist: 45 days to go',
+  date: NOW - 1.5 * DAY,
+  folder: 'drafts',
+  accountId: 'berkeley',
+  category: 'notifications',
+  inReplyTo: checklistMsg.messageId,
+  references: [checklistMsg.messageId],
+  body: [
+    "Hi, Quick question about the insurance requirement — I'm currently on SHIP through campus. Does that satisfy the UCEAP coverage minimums for the UK, or do I need the supplemental plan regardless? The checklist wording"
+  ]
+})
+
+// Remaining drafts.
+push({
+  from: identityOf('gmail'),
+  to: [{ name: 'Mom', address: MOM.address }],
+  subject: 'thanksgiving flights',
+  date: NOW - 0.3 * DAY,
+  folder: 'drafts',
+  accountId: 'gmail',
+  body: [
+    "Hi Mom, Looking at flights home for Thanksgiving — the Tuesday night one gets in at 11:40pm, the Wednesday morning one is $120 more but I'd actually be awake for dinner prep.",
+    "Also thinking about what to do with my plants while I'm in London. Options are (a) you inherit them, (b)"
+  ]
+})
+push({
+  from: identityOf('berkeley'),
+  to: [OWEN],
+  subject: 'project partner?',
+  date: NOW - 2.4 * DAY,
+  folder: 'drafts',
+  accountId: 'berkeley',
+  body: [
+    "Hey — are you doing the CDSS project with anyone yet? I'm dangerously close to just doing it solo, but the spec says groups of two get access to the bigger dataset and",
+    '(also fair warning, I will be in London for the last two weeks of it, but the deliverables are all remote-friendly)'
+  ]
+})
+push({
+  from: identityOf('gmail'),
+  to: [FELIX],
+  subject: 'packing list — what did you actually use?',
+  date: NOW - 4.1 * DAY,
+  folder: 'drafts',
+  accountId: 'gmail',
+  body: [
+    'Making my London packing list and realizing I own three jackets that all do the same thing. You studied abroad — what did you actually use vs. haul around for five months?',
+    'Current list: laptop, two universal adapters (learned from your mistake), rain shell, one nice outfit for whatever formal dinner situation may arise, and'
+  ]
+})
+
+// A standalone note from Mom (header name again resolved to "Mom" by contacts).
+push({
+  from: MOM,
+  to: [identityOf('gmail')],
+  subject: 'Fwd: Your flight confirmation',
+  date: NOW - 11.2 * DAY,
+  accountId: 'gmail',
+  body: [
+    'Forwarding this so you have a copy too. Dad says to book the airport shuttle early. Also call your grandmother, she asked about you twice this week.',
+    'Do you need us to bring anything up when we visit before you leave? Dad found your old rain jacket in the garage and insists London requires it.',
+    'Love, Mom'
+  ]
+})
+
+// Spam. Named senders, no contacts, obviously fake domains.
+interface SpamTemplate {
+  from: Mailbox
+  accountId: string
+  subject: string
+  body: string[]
+  daysAgo: number
+  seen: boolean
+}
+
+const SPAM_MAIL: SpamTemplate[] = [
+  {
+    from: { name: 'USPS Parcel Alert', address: 'delivery@usps-parcel-alerts.info' },
+    accountId: 'gmail',
+    subject: 'Your package could not be delivered — schedule redelivery now',
+    daysAgo: 0.8,
+    seen: false,
+    body: [
+      'Dear Customer, We attempted to deliver your package today but were unable to complete the delivery because of an incomplete address. Your parcel USPS-9400-1102-8845 is being held at our facility.',
+      'To schedule redelivery, please confirm your address and pay the $1.95 redelivery fee within 24 hours or your package will be returned to sender.',
+      'This is the final notice. Click here to confirm your details now.'
+    ]
+  },
+  {
+    from: { name: 'Coinbase Rewards', address: 'promo@coinbase-rewardz.win' },
+    accountId: 'gmail',
+    subject: 'You have unclaimed Bitcoin worth $312.44',
+    daysAgo: 2.4,
+    seen: false,
+    body: [
+      'Congratulations! Our records show a pending BTC reward of $312.44 linked to this email address from our 2025 loyalty program. Rewards not claimed within 48 hours are forfeited.',
+      'Verify your wallet now to release the funds. This offer cannot be extended.'
+    ]
+  },
+  {
+    from: { name: 'Netflix Billing', address: 'account-verify@netfliix-support.com' },
+    accountId: 'icloud',
+    subject: 'Your account is on hold — update your payment information',
+    daysAgo: 4.6,
+    seen: true,
+    body: [
+      'Dear Valued Customer, We were unable to process your last payment. To avoid interruption of service, please update your billing information within 48 hours.',
+      'If we do not receive updated payment details, your membership and viewing history will be permanently deleted. Update now to keep watching.'
+    ]
+  },
+  {
+    from: { name: 'Vehicle Warranty Dept', address: 'noreply@auto-warranty-final.org' },
+    accountId: 'icloud',
+    subject: "FINAL NOTICE: your vehicle's extended warranty",
+    daysAgo: 7.5,
+    seen: false,
+    body: [
+      "We have been trying to reach you concerning your vehicle's extended warranty. Your factory coverage has expired or is about to expire, and you are still eligible for renewal at a reduced rate.",
+      'This is your final courtesy notice before your file is closed permanently. Reply now to speak with a coverage specialist today.'
+    ]
+  },
+  {
+    from: { name: 'Prize Notification Dept', address: 'claims@intl-lottery-notice.net' },
+    accountId: 'gmail',
+    subject: 'CONGRATULATIONS: your email address has WON $2,500,000.00',
+    daysAgo: 11,
+    seen: true,
+    body: [
+      'Dear Lucky Winner, Your email address was selected in the International Email Lottery Programme held on 15th August. You have won the sum of $2,500,000.00 (Two Million Five Hundred Thousand Dollars).',
+      'To begin your claim, send your full name, address, phone number, and a copy of a valid ID to our claims agent. Note: keep this notification confidential to avoid double claims.'
+    ]
+  },
+  {
+    from: { name: 'Barrister Emmanuel Okon', address: 'emmanuel.okon.esq@lagos-chambers-mail.com' },
+    accountId: 'berkeley',
+    subject: 'URGENT BUSINESS PROPOSAL (CONFIDENTIAL)',
+    daysAgo: 13.8,
+    seen: false,
+    body: [
+      'Dear Friend, I am Barrister Emmanuel Okon, personal attorney to a late client who shares your surname. He left behind the sum of USD $8.4M in a dormant account with no next of kin.',
+      'I propose to present you as the beneficiary. For your cooperation you will receive 40% of the total sum. This transaction is 100% risk free and legal.',
+      'Kindly reply with your direct telephone number for more details. Time is of the essence.'
+    ]
+  }
+]
+
+for (const s of SPAM_MAIL) {
+  push({
+    from: s.from,
+    to: [identityOf(s.accountId)],
+    subject: s.subject,
+    date: NOW - s.daysAgo * DAY,
+    body: s.body,
+    accountId: s.accountId,
+    folder: 'spam',
+    seen: s.seen,
+    category: 'notifications'
+  })
+}
+
+// ---------------------------------------------------------------------------
+// The generated stream: institutional notifications, one-off people mail, and
+// calendar invites, dense recently and thinning out ~20 days back.
+// ---------------------------------------------------------------------------
 
 interface MsgTemplate {
   subject: string
@@ -60,14 +826,15 @@ interface MsgTemplate {
 }
 
 interface NotifSource {
-  sender: Sender
+  from: Mailbox
   accountId: string
+  replyTo?: Mailbox
   messages: MsgTemplate[]
 }
 
 const NOTIF_SOURCES: NotifSource[] = [
   {
-    sender: makeSender('Berkeley Study Abroad - UCEAP', 'studyabroad@berkeley.edu'),
+    from: UCEAP,
     accountId: 'berkeley',
     messages: [
       {
@@ -95,14 +862,6 @@ const NOTIF_SOURCES: NotifSource[] = [
         ]
       },
       {
-        subject: 'Pre-Departure Checklist: 45 days to go',
-        body: [
-          'Dear Devah, Your program start date is approaching. Please review your pre-departure checklist: passport validity, visa appointment, flight itinerary, and proof of insurance are still outstanding.',
-          'Your passport must be valid for at least six months beyond your program end date. UK Student visa appointments at the San Francisco application centre are currently booking about three weeks out, so schedule yours now.',
-          'Upload each document to the portal as you complete it. Items are reviewed within two business days and you will be notified of anything that needs correction.'
-        ]
-      },
-      {
         subject: 'Reminder: Study Abroad 101 Webinar this Thursday',
         body: [
           'Join us Thursday at 4:00 PM PT for Study Abroad 101, covering budgeting, housing, and academic planning for your term abroad. Registration closes Wednesday at noon.',
@@ -113,7 +872,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('noreplyuclc@berkeley.edu', 'noreplyuclc@berkeley.edu'),
+    from: { name: 'UC Learning Center', address: 'noreplyuclc@berkeley.edu' },
     accountId: 'berkeley',
     messages: [
       {
@@ -143,7 +902,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('Ed', 'no-reply@edstem.org'),
+    from: { name: 'Ed', address: 'no-reply@edstem.org' },
     accountId: 'berkeley',
     messages: [
       {
@@ -180,7 +939,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('KCL - StudyAbroad', 'studyabroad@kcl.ac.uk'),
+    from: { name: 'KCL - StudyAbroad', address: 'studyabroad@kcl.ac.uk' },
     accountId: 'berkeley',
     messages: [
       {
@@ -210,8 +969,9 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('London Study Center', 'info@londonstudycenter.org'),
+    from: { name: 'London Study Center', address: 'info@londonstudycenter.org' },
     accountId: 'berkeley',
+    replyTo: { name: 'London Study Center', address: 'hello@londonstudycenter.org' },
     messages: [
       {
         subject: 'Housing options for Spring 2027 now live',
@@ -232,7 +992,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('GitHub', 'notifications@github.com'),
+    from: { name: 'GitHub', address: 'notifications@github.com' },
     accountId: 'gmail',
     messages: [
       {
@@ -269,8 +1029,9 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('LinkedIn', 'messages-noreply@linkedin.com'),
+    from: { name: 'LinkedIn', address: 'messages-noreply@linkedin.com' },
     accountId: 'gmail',
+    replyTo: { name: 'LinkedIn Job Alerts', address: 'jobs-listings@linkedin.com' },
     messages: [
       {
         subject: 'You appeared in 9 searches this week',
@@ -296,7 +1057,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('Canvas | bCourses', 'notifications@instructure.com'),
+    from: { name: 'Canvas | bCourses', address: 'notifications@instructure.com' },
     accountId: 'berkeley',
     messages: [
       {
@@ -325,7 +1086,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('Piazza', 'no-reply@piazza.com'),
+    from: { name: 'Piazza', address: 'no-reply@piazza.com' },
     accountId: 'berkeley',
     messages: [
       {
@@ -345,7 +1106,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('Google Cloud', 'CloudPlatform-noreply@google.com'),
+    from: { name: 'Google Cloud', address: 'cloudplatform-noreply@google.com' },
     accountId: 'gmail',
     messages: [
       {
@@ -366,7 +1127,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('Handshake', 'handshake@notifications.joinhandshake.com'),
+    from: { name: 'Handshake', address: 'handshake@notifications.joinhandshake.com' },
     accountId: 'berkeley',
     messages: [
       {
@@ -394,7 +1155,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('Berkeley EH&S', 'ehs@berkeley.edu'),
+    from: { name: 'Berkeley EH&S', address: 'ehs@berkeley.edu' },
     accountId: 'berkeley',
     messages: [
       {
@@ -414,7 +1175,7 @@ const NOTIF_SOURCES: NotifSource[] = [
     ]
   },
   {
-    sender: makeSender('Cal Student Central', 'studentcentral@berkeley.edu'),
+    from: { name: 'Cal Student Central', address: 'studentcentral@berkeley.edu' },
     accountId: 'berkeley',
     messages: [
       {
@@ -437,59 +1198,13 @@ const NOTIF_SOURCES: NotifSource[] = [
   }
 ]
 
-const PEOPLE_MESSAGES: MsgTemplate[] = [
+const PEOPLE_TEMPLATES: MsgTemplate[] = [
   {
     subject: 'Coffee before lecture?',
     body: [
       "Hey! I'm getting to campus around 9 tomorrow — want to grab coffee at V&A before 101? I also wanted to pick your brain about the KCL application.",
       'I finally got my nomination email last night and the acknowledgement form is confusingly worded. Did you already write the statement of purpose part, and how long did yours end up?',
       "If 9 is too early I can do 9:30 — lecture isn't until 10:10 anyway."
-    ]
-  },
-  {
-    subject: "Notes from today's discussion",
-    body: [
-      'Hey Devah, here are my notes from discussion today. I flagged the part about exchange arguments since the GSI hinted it shows up on the midterm.',
-      "The worked example on slide 14 is the one he called 'exam-adjacent', so I typed that one up in full. My handwriting on the proof sketch got bad toward the end — ping me if a step doesn't make sense.",
-      "Doc is in our shared folder under 'disc-week4'."
-    ]
-  },
-  {
-    subject: 'Re: housing in London',
-    body: [
-      'Ok so I looked at the halls you sent — Stamford Street is way closer to campus but Goodenough College looks amazing. My cousin says Zone 2 is fine if you get a room near the Tube.',
-      "Also apparently Goodenough has a formal dinner thing, which is either amazing or deeply weird and I genuinely can't tell. Stamford Street is like eight minutes to campus though, and you hate commuting.",
-      "Want to just call tonight and go through the options together? I'm free after 8."
-    ]
-  },
-  {
-    subject: 'Re: study group this weekend',
-    body: [
-      "Saturday works for me! Moffitt 4th floor at 2? I reserved a room just in case. Bring your HW3 attempt — I'm stuck on the last part too.",
-      "Can we also spend 20 minutes on the exchange argument material before we start? I have the general shape but I keep hand-waving the tie-breaking case, and I know that's exactly where they get you."
-    ]
-  },
-  {
-    subject: 'you left your charger in Soda',
-    body: [
-      "pretty sure this is yours — it was on the table in 380 after we left. I'll be in the Woz until 5 if you want to come grab it.",
-      "It's the 96W one with the sticker, so I figured you'd want it back before your laptop dies mid-lecture again."
-    ]
-  },
-  {
-    subject: 'Spring sublease?',
-    body: [
-      "Hey! Heard you're going abroad in the spring — are you planning to sublease your room? My friend is transferring in January and needs a place near campus.",
-      "She's clean, quiet, and has a cat (deal-breaker? be honest). She can do $1,100 plus utilities, and the timing lines up with your program almost exactly — January through May.",
-      'No pressure either way, just let me know before you list it anywhere else.'
-    ]
-  },
-  {
-    subject: 'Re: flight to Heathrow',
-    body: [
-      'I found a nonstop SFO-LHR on the 8th for $612 if we book by Friday. If we land together we can split the Heathrow Express, or honestly the Piccadilly line is fine.',
-      "The return leg is the annoying part — flying back on a Saturday adds like $150. I say we book the outbound now and sort returns later, since your program end date isn't final anyway.",
-      "Sending you the Google Flights link — fare-lock it if you're not ready to commit."
     ]
   },
   {
@@ -500,28 +1215,6 @@ const PEOPLE_MESSAGES: MsgTemplate[] = [
     ]
   },
   {
-    subject: 'Dinner Friday?',
-    body: [
-      "We're doing Thai on Telegraph before you disappear to London forever. Friday 7pm, usual spot. Say yes.",
-      "Sarah's in, Marcus is a maybe because of his 6pm section. If we get there before 7 we can actually get the big table in the back."
-    ]
-  },
-  {
-    subject: 'Quick question about the CDSS lab',
-    body: [
-      "Hey, in lab 4 did your confidence interval come out around (0.42, 0.58)? Mine looks suspicious and I can't tell if I'm bootstrapping wrong or the data is just like that.",
-      'I reran it with 10,000 resamples instead of 1,000 and it barely moved, so now I suspect my cleaning step. Did you drop the null rows before or after splitting?'
-    ]
-  },
-  {
-    subject: 'Re: recommendation letter',
-    body: [
-      "Hi Devah, I'd be glad to write in support of your application. Could you send me your resume, transcript, and a short paragraph on the program by end of next week?",
-      'It also helps if you remind me which assignments from my course you were proudest of — specifics make these letters much stronger than generalities.',
-      'And confirm the deadline for me, please. I want to make sure it goes in well ahead of time.'
-    ]
-  },
-  {
     subject: 'photos from Tahoe',
     body: [
       'Finally went through the photos from the Tahoe trip — the sunrise ones from the ridge came out insane. Album link below, download whatever you want.',
@@ -529,54 +1222,73 @@ const PEOPLE_MESSAGES: MsgTemplate[] = [
     ]
   },
   {
-    subject: 'Re: splitting the Costco run',
+    subject: 'splitting the Costco run',
     body: [
       'Your share comes out to $23.40 — I got the oat milk you asked for and they were out of the good granola so I improvised. Venmo whenever.',
       "For the record the 'improvised' granola is better and I will not be taking questions. Receipt photo attached if you want to check my math."
     ]
   },
   {
-    subject: 'did you see the Stripe posting',
+    subject: 'game night saturday?',
     body: [
-      'The Stripe intern posting just went up on Handshake and it closes in two weeks. We should do a mock interview swap before then — are you free Tuesday?',
-      "I can do Tuesday after 4 or Wednesday morning. Let's do one behavioral and one medium problem each, and actually time them this round instead of chatting through the answers."
+      "We're doing game night Saturday at the Fulton place — bring the weird euro game you keep threatening us with. 8pm, snacks are handled, byo-opinions about rules.",
+      'RSVP so we know whether to set up the six-player table or the normal-people table.'
     ]
   },
   {
-    subject: "Re: Notes from today's discussion",
+    subject: 'ride to SFO next week?',
     body: [
-      'These are so good, thank you!! The tie-breaking part finally clicked. Trade you for my CDSS notes — also did you start the project yet or are we both doomed?',
-      "I have not started the project. The spec says it's two weeks of work. We have nine days. It's fine. Everything is fine.",
-      'CDSS notes are in the same shared folder — the sampling diagrams actually came out legible this time.'
+      "You mentioned you're flying out Thursday — I have the car that day and zero morning plans. Want a ride to SFO? Beats the BART transfer with two suitcases.",
+      "Only condition is we leave with buffer, because I refuse to reenact the Great Terminal Sprint of last spring. I'll even spring for the good breakfast burritos on the way."
     ]
   },
   {
-    subject: 'intro to my friend at KCL',
+    subject: 'CalHacks team?',
     body: [
-      "Devah — meet Priya, she's a second-year at King's and lived in Stamford Street last year. Priya, Devah's headed to KCL in the spring and has housing questions.",
-      'Priya did the whole Zone 1 versus Zone 2 math last year so you don\'t have to, and she knows which modules are secretly great. She\'s also just fun — you two will get along.',
-      "I'll let you two take it from here!"
-    ]
-  }
-]
-
-const MOM = makeSender('Mom', 'linda.schaefers@comcast.net')
-
-const MOM_MESSAGES: MsgTemplate[] = [
-  {
-    subject: 'checking in',
-    body: [
-      "Hi sweetheart, Dad and I were talking about your London plans last night. Have you heard back about housing yet? Grandma wants to know if you'll be home for Thanksgiving before you go.",
-      'Also your cousin Emma got into Michigan, so expect a call from Aunt Carol about it. Act surprised.',
-      'Eat something green this week. Love, Mom'
+      'CalHacks signups opened this morning — are we doing this? I have an idea involving the campus shuttle API that is either very funny or actually useful, possibly both.',
+      "We'd need a fourth. I was thinking of asking that friend of yours who did the map visualization thing — intro us if you think they'd be down?"
     ]
   },
   {
-    subject: 'Fwd: Your flight confirmation',
+    subject: 'your mail keeps coming to the old place',
     body: [
-      'Forwarding this so you have a copy too. Dad says to book the airport shuttle early. Also call your grandmother, she asked about you twice this week.',
-      'Do you need us to bring anything up when we visit before you leave? Dad found your old rain jacket in the garage and insists London requires it.',
-      'Love, Mom'
+      "Hey, you still get mail here — two things from the registrar and something that looks suspiciously like a jury summons. Want me to drop them at yours or hold them until you're around?",
+      "I'm around all week except Wednesday. The jury one looks time-sensitive, just saying."
+    ]
+  },
+  {
+    subject: 'IM soccer — we need a sixth',
+    body: [
+      'Our IM team is down a player for the rest of the season and I remembered you claiming, in public, to be good. Games are Tuesday nights at Underhill, very low stakes, high vibes.',
+      "First game is this Tuesday at 8. Cleats optional, the turf is forgiving. Say yes and I'll add you to the roster before the deadline."
+    ]
+  },
+  {
+    subject: 'borrowing your HDMI adapter',
+    body: [
+      "Took your HDMI adapter off your desk for my presentation this afternoon — telling you here so you don't tear the room apart looking for it. Back by 4, I promise.",
+      'In exchange, there is a leftover boba in the fridge with your name on it. The good kind, not the one from the place we no longer discuss.'
+    ]
+  },
+  {
+    subject: 'apartment heater is doing the thing again',
+    body: [
+      "The heater is making the clanking noise again and I refuse to be gaslit about it this time — I recorded it. Sending the landlord an email tonight; reply if you want your name on it too.",
+      'Also the kitchen faucet drips unless you close it at a very specific angle, which I have now mastered, but that should not be a skill.'
+    ]
+  },
+  {
+    subject: 'GSI section swap?',
+    body: [
+      "You're in the Tuesday 5pm section, right? I got a work conflict and need to swap into it — would you be willing to take my Thursday 11am? The GSI says it's fine if we both email him.",
+      'Thursday GSI is the one who posts full solutions, if that sweetens the deal.'
+    ]
+  },
+  {
+    subject: 'saw this and thought of your project',
+    body: [
+      'That dataset you were hunting for the CDSS project — the city just published a cleaned version of it, updated monthly, with an actual data dictionary. Link below.',
+      'The license is fine for coursework. There goes your best excuse for not starting.'
     ]
   }
 ]
@@ -621,12 +1333,13 @@ function fmtHour(h: number): string {
   return h < 12 ? `${h}am` : `${h - 12}pm`
 }
 
-function inviteBody(ev: InviteEvent, day: string, organizer: Sender): string[] {
+function inviteBody(ev: InviteEvent, day: string, organizer: Mailbox): string[] {
+  const organizerName = organizer.name ?? organizer.address
   const when = `${day}, ${fmtHour(ev.start)} - ${fmtHour(ev.end)} Pacific Time`
   switch (ev.kind) {
     case 'Invitation':
       return [
-        `You have been invited to the following event. When: ${when}. Where: ${ev.where}. Organizer: ${organizer.name}. Join with Google Meet.`,
+        `You have been invited to the following event. When: ${when}. Where: ${ev.where}. Organizer: ${organizerName}. Join with Google Meet.`,
         'Going? Respond Yes, No, or Maybe from your calendar. Your response is shared with the organizer, and other guests can see the updated attendee list.',
         'You are receiving this message because you are subscribed to calendar notifications for this account.'
       ]
@@ -642,15 +1355,11 @@ function inviteBody(ev: InviteEvent, day: string, organizer: Sender): string[] {
       ]
     case 'Accepted':
       return [
-        `${organizer.name} has accepted this invitation. ${ev.title}, ${when}. Where: ${ev.where}.`,
+        `${organizerName} has accepted this invitation. ${ev.title}, ${when}. Where: ${ev.where}.`,
         'This response has been recorded on your calendar. Current attendance: 2 yes, 0 no, 0 awaiting reply. No further action is needed.'
       ]
   }
 }
-
-const MINUTE = 60 * 1000
-const DAY = 24 * 60 * MINUTE
-const NOW = Date.now()
 
 // berkeley 40% / gmail 30% / college 10% / icloud 10% / abundant 10%
 const ACCOUNT_WEIGHTS = [
@@ -670,26 +1379,26 @@ function pickAccount(): string {
   return faker.helpers.arrayElement(ACCOUNT_WEIGHTS)
 }
 
-const peoplePool: Sender[] = Array.from({ length: 20 }, () => {
-  const firstName = faker.person.firstName()
-  const lastName = faker.person.lastName()
-  return makeSender(`${firstName} ${lastName}`, faker.internet.email({ firstName, lastName }).toLowerCase())
-})
-
-// Emails per day, day 0 = today. Denser toward now; sums to 180.
-const DAY_COUNTS = [16, 14, 13, 12, 11, 11, 10, 9, 8, 8, 8, 7, 7, 7, 6, 6, 6, 6, 5, 5, 5]
+// Emails per day, day 0 = today. Denser toward now; sums to 150.
+const DAY_COUNTS = [14, 12, 11, 10, 10, 9, 9, 8, 8, 7, 7, 7, 6, 6, 5, 5, 4, 4, 3, 3, 2]
 
 const categoryDeck: Category[] = faker.helpers.shuffle([
-  ...(Array(108).fill('notifications') as Category[]),
-  ...(Array(45).fill('people') as Category[]),
-  ...(Array(27).fill('invites') as Category[])
+  ...(Array(100).fill('notifications') as Category[]),
+  ...(Array(26).fill('people') as Category[]),
+  ...(Array(24).fill('invites') as Category[])
 ])
 
-// Sent, drafts, and spam are hand-written below; the generated stream is inbox plus trash.
-const folderDeck: Folder[] = faker.helpers.shuffle([
-  ...(Array(172).fill('inbox') as Folder[]),
-  ...(Array(8).fill('trash') as Folder[])
-])
+// Sent, drafts, spam, and conversations are hand-written above; the generated
+// stream is inbox plus a handful of trash. Archive is carved out afterward.
+// The first four slots (today's forced-inbox arrivals) stay out of the shuffle
+// so the trash count lands exactly.
+const folderDeck: Folder[] = [
+  ...(Array(4).fill('inbox') as Folder[]),
+  ...faker.helpers.shuffle([
+    ...(Array(138).fill('inbox') as Folder[]),
+    ...(Array(8).fill('trash') as Folder[])
+  ])
+]
 
 const notifDeck = faker.helpers
   .shuffle(
@@ -701,27 +1410,15 @@ const notifDeck = faker.helpers
       ])
     )
   )
-  .slice(0, 108)
+  .slice(0, 100)
 
-const peopleDeck = faker.helpers.shuffle([...PEOPLE_MESSAGES, ...PEOPLE_MESSAGES, ...PEOPLE_MESSAGES]).slice(0, 45)
+const peopleDeck = faker.helpers
+  .shuffle([...PEOPLE_TEMPLATES, ...PEOPLE_TEMPLATES, ...PEOPLE_TEMPLATES])
+  .slice(0, 26)
 
-const inviteDeck = faker.helpers.shuffle([...INVITE_EVENTS, ...INVITE_EVENTS, ...INVITE_EVENTS]).slice(0, 27)
+const inviteDeck = faker.helpers.shuffle([...INVITE_EVENTS, ...INVITE_EVENTS, ...INVITE_EVENTS]).slice(0, 24)
 
-interface Draft {
-  ms: number
-  dayIndex: number
-  accountId: string
-  sender: Sender
-  subject: string
-  body: string[]
-  category: Category
-  read: boolean
-  important: boolean
-  pinned: boolean
-  folder: Folder
-}
-
-const drafts: Draft[] = []
+const generated: Message[] = []
 let slot = 0
 let peopleIdx = 0
 let notifIdx = 0
@@ -759,507 +1456,130 @@ for (let dayIndex = 0; dayIndex < DAY_COUNTS.length; dayIndex++) {
     const forcedInbox = dayIndex === 0 && j < 4
     const folder = forcedInbox ? 'inbox' : folderDeck[slot]
 
-    let sender: Sender
+    let from: Mailbox
+    let replyToMailbox: Mailbox | undefined
+    let cc: Mailbox[] | undefined
     let subject: string
     let body: string[]
     let accountId: string
 
     if (category === 'notifications') {
       const { src, msg } = notifDeck[notifIdx++]
-      sender = src.sender
+      from = src.from
+      replyToMailbox = src.replyTo
       subject = msg.subject
       body = msg.body
       accountId = src.accountId
     } else if (category === 'people') {
-      if (peopleIdx === 4 || peopleIdx === 22) {
-        const msg = MOM_MESSAGES[peopleIdx === 4 ? 0 : 1]
-        sender = MOM
-        subject = msg.subject
-        body = msg.body
-        accountId = 'gmail'
-      } else {
-        const msg = peopleDeck[peopleIdx]
-        sender = faker.helpers.arrayElement(peoplePool)
-        subject = msg.subject
-        body = msg.body
-        accountId = pickAccount()
+      const msg = peopleDeck[peopleIdx]
+      from = PEOPLE_POOL[peopleIdx % PEOPLE_POOL.length]
+      subject = msg.subject
+      body = msg.body
+      accountId = pickAccount()
+      // Occasional cc, like group mail among friends.
+      if (peopleIdx % 6 === 2) {
+        const extra = PEOPLE_POOL[(peopleIdx + 7) % PEOPLE_POOL.length]
+        if (extra.address !== from.address) cc = [extra]
       }
       peopleIdx++
     } else {
-      const ev = inviteDeck[inviteIdx++]
-      const organizer = ev.fromUceap ? NOTIF_SOURCES[0].sender : faker.helpers.arrayElement(peoplePool)
+      const ev = inviteDeck[inviteIdx]
+      const organizer = ev.fromUceap ? UCEAP : NAMED_POOL[inviteIdx % NAMED_POOL.length]
+      accountId = ev.fromUceap ? 'berkeley' : pickAccount()
       const eventDate = new Date(ms + faker.number.int({ min: 1, max: 6 }) * DAY)
       const day = fmtEventDay(eventDate)
-      sender = organizer
-      subject = `${ev.kind}: ${ev.title} @ ${day} ${fmtHour(ev.start)} - ${fmtHour(ev.end)} (devah@berkeley.edu)`
+      from = organizer
+      subject = `${ev.kind}: ${ev.title} @ ${day} ${fmtHour(ev.start)} - ${fmtHour(ev.end)} (${identityOf(accountId).address})`
       body = inviteBody(ev, day, organizer)
-      accountId = ev.fromUceap ? 'berkeley' : pickAccount()
+      inviteIdx++
     }
 
     const ageMinutes = (NOW - ms) / MINUTE
-    const read = ageMinutes <= 120 ? false : faker.datatype.boolean(0.72)
+    const seen = ageMinutes <= 120 ? false : faker.datatype.boolean(0.66)
 
-    drafts.push({
-      ms,
-      dayIndex,
-      accountId,
-      sender,
-      subject,
-      body,
-      category,
-      read,
-      important: false,
-      pinned: false,
-      folder
-    })
+    generated.push(
+      push({
+        from,
+        to: [identityOf(accountId)],
+        cc,
+        replyTo: replyToMailbox,
+        subject,
+        date: ms,
+        body,
+        accountId,
+        folder,
+        seen,
+        category
+      })
+    )
     slot++
   }
 }
 
 // ---------------------------------------------------------------------------
-// Sent, drafts, and spam: hand-written, appended outside the generated stream.
-// For sent and draft mail, `sender` is the RECIPIENT (what the list shows).
+// Post-passes: archive ("done") backlog, the third flagged thread, importance.
+// Picked by stepping through the stream (no faker) so the sequence stays put.
 // ---------------------------------------------------------------------------
 
-const PRIYA = makeSender('Priya Raghavan', 'priya.raghavan@kcl.ac.uk')
+// Twelve older, read generated messages start archived so the Archive folder
+// and the show-done toggle have content.
+const archiveCandidates = generated.filter(
+  (m) => m.folder === 'inbox' && m.flags.seen && (NOW - Date.parse(m.date)) / DAY >= 3
+)
+const stepped = archiveCandidates.filter((_, i) => i % 5 === 0)
+const rest = archiveCandidates.filter((_, i) => i % 5 !== 0)
+for (const m of [...stepped, ...rest].slice(0, 12)) m.folder = 'archive'
 
-function pickPerson(): Sender {
-  return faker.helpers.arrayElement(peoplePool)
-}
+// Flag the KCL nomination notice (third flagged thread, alongside Mom + Priya).
+const kclNomination = generated.find(
+  (m) => m.folder === 'inbox' && m.subject === 'Nomination for Study Abroad at KCL - next step'
+)
+if (kclNomination) kclNomination.flags.flagged = true
 
-interface ExtraMail {
-  sender: Sender
-  accountId: string
-  subject: string
-  body: string[]
-  /** Fractional days before NOW; minute-level jitter is added on top */
-  daysAgo: number
-  category: Category
-  read: boolean
-}
+built.sort((a, b) => b.date.localeCompare(a.date))
 
-const SENT_MAIL: ExtraMail[] = [
-  {
-    sender: pickPerson(),
-    accountId: 'berkeley',
-    subject: 'Re: study group this weekend',
-    body: [
-      "Saturday at 2 works — see you on the Moffitt 4th floor. The room is under your name, right? I'll bring my HW3 attempt: parts (a) and (b) are done, plus a graveyard of failed ideas for (c).",
-      "Can we also spend 20 minutes on the exchange argument before we start? I think I finally get the tie-breaking case, and explaining it out loud will tell me whether that's actually true.",
-      'Devah'
-    ],
-    daysAgo: 0.6,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: MOM,
-    accountId: 'gmail',
-    subject: 'Re: checking in',
-    body: [
-      "Hi Mom, good news — housing came through this morning. I got a spot at Stamford Street, the one eight minutes from campus. It's an ensuite, so you can officially stop worrying about the shared bathroom thing.",
-      "Yes to Thanksgiving — I land the Tuesday before. And I'll call Grandma this Sunday, I promise. Tell her to take her phone off silent this time.",
-      'Love, Devah'
-    ],
-    daysAgo: 1.2,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'berkeley',
-    subject: "Re: Notes from today's discussion",
-    body: [
-      'You are genuinely a lifesaver — the slide 14 writeup is clearer than the actual lecture. I added my solutions for the practice problems at the bottom of the doc in a different color.',
-      'Trade accepted on the CDSS notes. And no, I have not started the project either. Nine days is basically two weeks if you round up.',
-      'Devah'
-    ],
-    daysAgo: 2.1,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'berkeley',
-    subject: 'Re: recommendation letter',
-    body: [
-      "Thank you so much — this means a lot. I've attached my resume, unofficial transcript, and a paragraph about the KCL program and why I'm applying.",
-      "The assignments I'm proudest of from your course are the scheduling problem on HW2 and my final project on approximation algorithms. Happy to send either writeup if it would help.",
-      'The deadline is October 15 through the UCEAP portal — it should email you a submission link directly. Thanks again, Devah'
-    ],
-    daysAgo: 3,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'gmail',
-    subject: 'Re: flight to Heathrow',
-    body: [
-      'Booked! Nonstop on the 8th, seat 34A, $612 exactly as promised. Send me your confirmation number and I\'ll see about getting us seats together — worst case we bribe whoever has 34B.',
-      'Agreed on skipping the Heathrow Express; the Piccadilly line goes straight to my halls anyway. First pub lunch is on me if you handle the Oyster card logistics.',
-      'Devah'
-    ],
-    daysAgo: 3.8,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'berkeley',
-    subject: 'Re: you left your charger in Soda',
-    body: [
-      "That's mine, thank you!! I spent twenty minutes this morning convinced I'd left it at V&A. I'll swing by the Woz around 4:30 — if you've left by then, just leave it with whoever's at the front desk.",
-      'I owe you a coffee. Devah'
-    ],
-    daysAgo: 4.5,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'icloud',
-    subject: 'Re: Spring sublease?',
-    body: [
-      "Yes — I'm subleasing January through May and your friend's timing is basically perfect. $1,100 plus utilities works, and the cat is fine as long as she covers anything the cat destroys.",
-      "I'm putting together a short listing with photos this week. I'll send it to you first so she gets first shot before I post it anywhere.",
-      'Devah'
-    ],
-    daysAgo: 5.5,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: PRIYA,
-    accountId: 'berkeley',
-    subject: 'Re: intro to my friend at KCL',
-    body: [
-      "Hi Priya, so nice to e-meet you! I just got placed at Stamford Street, which I hear is where you lived — I am very open to a brain dump on anything from laundry logistics to which modules are secretly great.",
-      "No rush at all, but if you're up for a call sometime in the next few weeks I'd love that. Whatever time works with the time difference — my schedule is flexible after 9 AM Pacific.",
-      'Thanks for being up for the intro. Devah'
-    ],
-    daysAgo: 6.5,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: NOTIF_SOURCES[0].sender,
-    accountId: 'berkeley',
-    subject: 'Question about my transcript upload',
-    body: [
-      "Hi, I submitted my Acknowledgement of Nomination last week, but my portal checklist still shows the transcript item as 'in review' after ten days. The confirmation email said reviews take two business days.",
-      'Could you confirm it was received? I want to make sure nothing is holding up my file before the KCL deadline. My student ID is 3036841772.',
-      'Thank you, Devah Schaefers'
-    ],
-    daysAgo: 7.2,
-    category: 'notifications',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'berkeley',
-    subject: 'Re: did you see the Stripe posting',
-    body: [
-      "Tuesday after 4 works. Let's do the full loop: one behavioral, one medium each, actually timed, and no 'wait, let me just finish this thought' at the 35-minute mark. (That one's directed at me, not you.)",
-      "I grabbed a Cory breakout room for 4:15. Bring your question list from last time and I'll bring two new ones from the tagged list.",
-      'Devah'
-    ],
-    daysAgo: 8.4,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'gmail',
-    subject: 'Re: Dinner Friday?',
-    body: [
-      "Yes, obviously. I'll be there at 7 sharp, I'm getting the drunken noodles, and you cannot stop me.",
-      "Also, 'before you disappear to London forever' — it's five months. I'll be back before the good weather. Save the guilt trip for my mom, she's better at it.",
-      'Devah'
-    ],
-    daysAgo: 9.3,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'berkeley',
-    subject: 'Re: Quick question about the CDSS lab',
-    body: [
-      "Mine came out to (0.44, 0.57), so yours isn't crazy. I dropped the null rows before splitting — the lab spec buries that in a footnote under the second code cell.",
-      "If it still looks off after that, check that you're resampling with replacement. That one cost me an hour.",
-      'Devah'
-    ],
-    daysAgo: 10.5,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'gmail',
-    subject: 'sublease listing — read this before I post?',
-    body: [
-      "Can you sanity-check this before I put it up? 'Sunny room in 3BR near North Berkeley BART, Jan-May, $1,100/mo + utilities, furnished, quiet housemates, no smoking.' Does 'quiet housemates' sound like a threat?",
-      'Also: do I mention the kitchen situation, or let them discover the ant thing organically? Kidding. Mostly.',
-      'Devah'
-    ],
-    daysAgo: 11.4,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'berkeley',
-    subject: 'Re: Midterm review sesh Sunday',
-    body: [
-      "I'm in for Sunday. I added my solutions to the shared doc tonight — flagged two where I got a different answer from the doc, which should be fun to argue about in person.",
-      'Can someone bring a whiteboard marker that actually works? The ones in Moffitt have been dead since 2024.',
-      'Devah'
-    ],
-    daysAgo: 12.5,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'gmail',
-    subject: 'Re: photos from Tahoe',
-    body: [
-      'These are unreal — the ridge sunrise one is going straight into a frame. Can you send me the full-res of that one and the lake panorama?',
-      'I am aware of the sneeze photo. Name your price for its deletion.',
-      'Devah'
-    ],
-    daysAgo: 13.4,
-    category: 'people',
-    read: true
-  }
-]
-
-const DRAFT_MAIL: ExtraMail[] = [
-  {
-    sender: MOM,
-    accountId: 'gmail',
-    subject: 'thanksgiving flights',
-    body: [
-      "Hi Mom, Looking at flights home for Thanksgiving — the Tuesday night one gets in at 11:40pm, the Wednesday morning one is $120 more but I'd actually be awake for dinner prep.",
-      'Also thinking about what to do with my plants while I\'m in London. Options are (a) you inherit them, (b)'
-    ],
-    daysAgo: 0.3,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: NOTIF_SOURCES[0].sender,
-    accountId: 'berkeley',
-    subject: 'Re: Pre-Departure Checklist: 45 days to go',
-    body: [
-      "Hi, Quick question about the insurance requirement — I'm currently on SHIP through campus. Does that satisfy the UCEAP coverage minimums for the UK, or do I need the supplemental plan regardless? The checklist wording"
-    ],
-    daysAgo: 1.5,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'berkeley',
-    subject: 'project partner?',
-    body: [
-      "Hey — are you doing the CDSS project with anyone yet? I'm dangerously close to just doing it solo, but the spec says groups of two get access to the bigger dataset and",
-      '(also fair warning, I will be in London for the last two weeks of it, but the deliverables are all remote-friendly)'
-    ],
-    daysAgo: 2.4,
-    category: 'people',
-    read: true
-  },
-  {
-    sender: pickPerson(),
-    accountId: 'gmail',
-    subject: 'packing list — what did you actually use?',
-    body: [
-      'Making my London packing list and realizing I own three jackets that all do the same thing. You studied abroad — what did you actually use vs. haul around for five months?',
-      'Current list: laptop, two universal adapters (learned from your mistake), rain shell, one nice outfit for whatever formal dinner situation may arise, and'
-    ],
-    daysAgo: 4.1,
-    category: 'people',
-    read: true
-  }
-]
-
-const SPAM_MAIL: ExtraMail[] = [
-  {
-    sender: makeSender('USPS Parcel Alert', 'delivery@usps-parcel-alerts.info'),
-    accountId: 'gmail',
-    subject: 'Your package could not be delivered — schedule redelivery now',
-    body: [
-      'Dear Customer, We attempted to deliver your package today but were unable to complete the delivery because of an incomplete address. Your parcel USPS-9400-1102-8845 is being held at our facility.',
-      'To schedule redelivery, please confirm your address and pay the $1.95 redelivery fee within 24 hours or your package will be returned to sender.',
-      'This is the final notice. Click here to confirm your details now.'
-    ],
-    daysAgo: 0.8,
-    category: 'notifications',
-    read: false
-  },
-  {
-    sender: makeSender('Coinbase Rewards', 'promo@coinbase-rewardz.win'),
-    accountId: 'gmail',
-    subject: 'You have unclaimed Bitcoin worth $312.44',
-    body: [
-      'Congratulations! Our records show a pending BTC reward of $312.44 linked to this email address from our 2025 loyalty program. Rewards not claimed within 48 hours are forfeited.',
-      'Verify your wallet now to release the funds. This offer cannot be extended.'
-    ],
-    daysAgo: 2.4,
-    category: 'notifications',
-    read: false
-  },
-  {
-    sender: makeSender('Netflix Billing', 'account-verify@netfliix-support.com'),
-    accountId: 'icloud',
-    subject: 'Your account is on hold — update your payment information',
-    body: [
-      'Dear Valued Customer, We were unable to process your last payment. To avoid interruption of service, please update your billing information within 48 hours.',
-      'If we do not receive updated payment details, your membership and viewing history will be permanently deleted. Update now to keep watching.'
-    ],
-    daysAgo: 4.6,
-    category: 'notifications',
-    read: true
-  },
-  {
-    sender: makeSender('Vehicle Warranty Dept', 'noreply@auto-warranty-final.org'),
-    accountId: 'icloud',
-    subject: "FINAL NOTICE: your vehicle's extended warranty",
-    body: [
-      "We have been trying to reach you concerning your vehicle's extended warranty. Your factory coverage has expired or is about to expire, and you are still eligible for renewal at a reduced rate.",
-      'This is your final courtesy notice before your file is closed permanently. Reply now to speak with a coverage specialist today.'
-    ],
-    daysAgo: 7.5,
-    category: 'notifications',
-    read: false
-  },
-  {
-    sender: makeSender('Prize Notification Dept', 'claims@intl-lottery-notice.net'),
-    accountId: 'gmail',
-    subject: 'CONGRATULATIONS: your email address has WON $2,500,000.00',
-    body: [
-      'Dear Lucky Winner, Your email address was selected in the International Email Lottery Programme held on 15th August. You have won the sum of $2,500,000.00 (Two Million Five Hundred Thousand Dollars).',
-      'To begin your claim, send your full name, address, phone number, and a copy of a valid ID to our claims agent. Note: keep this notification confidential to avoid double claims.'
-    ],
-    daysAgo: 11,
-    category: 'notifications',
-    read: true
-  },
-  {
-    sender: makeSender('Barrister Emmanuel Okon', 'emmanuel.okon.esq@lagos-chambers-mail.com'),
-    accountId: 'berkeley',
-    subject: 'URGENT BUSINESS PROPOSAL (CONFIDENTIAL)',
-    body: [
-      'Dear Friend, I am Barrister Emmanuel Okon, personal attorney to a late client who shares your surname. He left behind the sum of USD $8.4M in a dormant account with no next of kin.',
-      'I propose to present you as the beneficiary. For your cooperation you will receive 40% of the total sum. This transaction is 100% risk free and legal.',
-      'Kindly reply with your direct telephone number for more details. Time is of the essence.'
-    ],
-    daysAgo: 13.8,
-    category: 'notifications',
-    read: false
-  }
-]
-
-function pushExtras(list: ExtraMail[], folder: Folder): void {
-  for (const m of list) {
-    const ms = NOW - Math.round(m.daysAgo * DAY) - faker.number.int({ min: 0, max: 150 }) * MINUTE
-    drafts.push({
-      ms,
-      dayIndex: Math.floor((NOW - ms) / DAY),
-      accountId: m.accountId,
-      sender: m.sender,
-      subject: m.subject,
-      body: m.body,
-      category: m.category,
-      read: m.read,
-      important: false,
-      pinned: false,
-      folder
-    })
-  }
-}
-
-pushExtras(SENT_MAIL, 'sent')
-pushExtras(DRAFT_MAIL, 'drafts')
-pushExtras(SPAM_MAIL, 'spam')
-
-drafts.sort((a, b) => b.ms - a.ms)
-
-// Exactly 8 important emails, four from today and four from yesterday,
-// preferring people then urgent notifications.
-const recent = drafts.filter((d) => d.dayIndex <= 1 && d.folder === 'inbox')
+// Eight important messages: four from today and four from yesterday, preferring
+// people, then urgent notifications.
 const urgentRe = /ACTION REQUIRED|Overdue|MUST READ|Action needed|due tomorrow|due soon/i
-function importanceRank(d: Draft): number {
-  if (d.category === 'people') return 0
-  if (d.category === 'notifications' && urgentRe.test(d.subject)) return 1
-  if (d.category === 'notifications') return 2
+function importanceRank(m: Message): number {
+  if (m.category === 'people') return 0
+  if (m.category === 'notifications' && urgentRe.test(m.subject)) return 1
+  if (m.category === 'notifications') return 2
   return 3
 }
-const importantPicks = [0, 1].flatMap((day) =>
-  recent
-    .filter((d) => d.dayIndex === day)
+function dayIndexOf(m: Message): number {
+  return Math.floor((NOW - Date.parse(m.date)) / DAY)
+}
+for (const day of [0, 1]) {
+  const picks = built
+    .filter((m) => m.folder === 'inbox' && dayIndexOf(m) === day)
     .sort((a, b) => importanceRank(a) - importanceRank(b))
     .slice(0, 4)
-)
-for (const d of importantPicks) d.important = true
-
-// Two to three pinned emails.
-const pinnedPicks = new Set<Draft>()
-if (importantPicks.length > 0) pinnedPicks.add(importantPicks[0])
-const olderPerson = drafts.find((d) => d.dayIndex >= 3 && d.category === 'people' && d.folder === 'inbox')
-if (olderPerson) pinnedPicks.add(olderPerson)
-const kclNomination = drafts.find(
-  (d) => d.subject === 'Nomination for Study Abroad at KCL - next step' && d.folder === 'inbox'
-)
-if (kclNomination) pinnedPicks.add(kclNomination)
-for (const d of pinnedPicks) d.pinned = true
-
-// About 12 older, read inbox emails start done (archived) so the Archive list
-// and the show-done toggle have content. Picked by stepping through the sorted
-// stream (no faker) so the seeded sequence above is untouched.
-const donePicks = new Set<Draft>()
-const doneCandidates = drafts.filter(
-  (d) => d.folder === 'inbox' && d.read && d.dayIndex >= 3 && !d.pinned && !d.important
-)
-for (let i = 0; i < doneCandidates.length && donePicks.size < 12; i += 7) {
-  donePicks.add(doneCandidates[i])
+  for (const m of picks) m.important = true
 }
 
-export const emails: Email[] = drafts.map((d, i) => ({
-  id: `email-${String(i + 1).padStart(3, '0')}`,
-  accountId: d.accountId,
-  sender: d.sender,
-  subject: d.subject,
-  preview: previewOf(d.body),
-  body: d.body,
-  date: new Date(d.ms).toISOString(),
-  category: d.category,
-  read: d.read,
-  important: d.important,
-  pinned: d.pinned,
-  folder: d.folder,
-  done: donePicks.has(d),
-  replies: []
-}))
+export const messages: Message[] = built
 
 // ---------------------------------------------------------------------------
-// Live "just arrived" emails for the refresh action. Plain rotation keyed by
+// Live "just arrived" messages for the refresh action. Plain rotation keyed by
 // existingCount — no faker at call time, so the seeded stream stays stable.
+// One rotation entry is a real reply into the seeded "Dinner Friday?" thread,
+// so refreshing can grow a conversation.
 // ---------------------------------------------------------------------------
 
 interface IncomingTemplate {
-  sender: Sender
+  from: Mailbox
   accountId: string
   category: Category
   subject: string
   body: string[]
+  inReplyTo?: string
+  references?: string[]
 }
 
 const INCOMING_TEMPLATES: IncomingTemplate[] = [
   {
-    sender: makeSender('Piazza', 'no-reply@piazza.com'),
+    from: { name: 'Piazza', address: 'no-reply@piazza.com' },
     accountId: 'berkeley',
     category: 'notifications',
     subject: 'Your post has 1 new reply',
@@ -1270,7 +1590,7 @@ const INCOMING_TEMPLATES: IncomingTemplate[] = [
     ]
   },
   {
-    sender: makeSender('GitHub', 'notifications@github.com'),
+    from: { name: 'GitHub', address: 'notifications@github.com' },
     accountId: 'gmail',
     category: 'notifications',
     subject: '[cs164-project] alexwang requested your review on #47',
@@ -1281,7 +1601,7 @@ const INCOMING_TEMPLATES: IncomingTemplate[] = [
     ]
   },
   {
-    sender: makeSender('Jordan Reyes', 'jordan.reyes@berkeley.edu'),
+    from: JORDAN,
     accountId: 'berkeley',
     category: 'people',
     subject: 'you around?',
@@ -1291,7 +1611,7 @@ const INCOMING_TEMPLATES: IncomingTemplate[] = [
     ]
   },
   {
-    sender: makeSender('Berkeley Study Abroad - UCEAP', 'studyabroad@berkeley.edu'),
+    from: UCEAP,
     accountId: 'berkeley',
     category: 'notifications',
     subject: 'Reminder: visa appointment documentation due this week',
@@ -1302,7 +1622,7 @@ const INCOMING_TEMPLATES: IncomingTemplate[] = [
     ]
   },
   {
-    sender: makeSender('Canvas | bCourses', 'notifications@instructure.com'),
+    from: { name: 'Canvas | bCourses', address: 'notifications@instructure.com' },
     accountId: 'berkeley',
     category: 'notifications',
     subject: 'Assignment graded: Lab 4 - Sampling Distributions',
@@ -1313,10 +1633,13 @@ const INCOMING_TEMPLATES: IncomingTemplate[] = [
     ]
   },
   {
-    sender: makeSender('Sarah Kim', 'sarahkim.cal@gmail.com'),
+    // A proper reply into the seeded dinner thread: refresh grows a conversation.
+    from: SARAH,
     accountId: 'gmail',
     category: 'people',
-    subject: 'friday headcount',
+    subject: 'Re: Dinner Friday?',
+    inReplyTo: dinnerM2.messageId,
+    references: [dinnerM1.messageId, dinnerM2.messageId],
     body: [
       "Update on Thai Friday: Marcus escaped his section, so we're six now. I moved the reservation to 7:15 so we actually get the big table.",
       "Also we're doing a group gift situation for your going-away — I'm telling you now so you act surprised competently. You didn't hear it from me."
@@ -1326,23 +1649,24 @@ const INCOMING_TEMPLATES: IncomingTemplate[] = [
 
 let incomingSeq = 0
 
-/** A fresh unread inbox email dated now; rotation by existingCount keeps it faker-free. */
-export function makeIncomingEmail(existingCount: number): Email {
+/** A fresh unread inbox message dated now; rotation by existingCount keeps it faker-free. */
+export function makeIncomingMessage(existingCount: number): Message {
   const t = INCOMING_TEMPLATES[existingCount % INCOMING_TEMPLATES.length]
+  incomingSeq += 1
   return {
-    id: `email-incoming-${++incomingSeq}-${Date.now()}`,
-    accountId: t.accountId,
-    sender: t.sender,
+    messageId: `<live-${incomingSeq}-${Date.now()}@${t.from.address.split('@')[1]}>`,
+    inReplyTo: t.inReplyTo,
+    references: t.references ? [...t.references] : [],
+    from: t.from,
+    to: [identityOf(t.accountId)],
+    cc: [],
     subject: t.subject,
-    preview: previewOf(t.body),
-    body: t.body,
     date: new Date().toISOString(),
-    category: t.category,
-    read: false,
-    important: false,
-    pinned: false,
+    body: t.body,
+    accountId: t.accountId,
     folder: 'inbox',
-    done: false,
-    replies: []
+    flags: { seen: false, flagged: false, answered: false },
+    category: t.category,
+    important: false
   }
 }

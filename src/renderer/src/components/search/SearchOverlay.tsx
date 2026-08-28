@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { Search, X } from 'lucide-react'
-import type { Email } from '../../data/types'
+import type { Mailbox } from '../../data/types'
+import { resolveMailbox } from '../../lib/identity'
+import { buildThreads, threadRootId, type Thread } from '../../lib/threads'
 import { filterByAccount, useAppStore } from '../../store'
-import EmailRow from '../inbox/EmailRow'
+import ThreadRow from '../inbox/ThreadRow'
 
-/** Global search across all mail (every folder, done included). Store-driven. */
+/** Global search across all mail (every folder, archive included). Store-driven. */
 export default function SearchOverlay(): React.JSX.Element | null {
   const searchOpen = useAppStore((s) => s.searchOpen)
   const setSearchOpen = useAppStore((s) => s.setSearchOpen)
-  const openEmail = useAppStore((s) => s.openEmail)
-  const openCompose = useAppStore((s) => s.openCompose)
-  const emails = useAppStore((s) => s.emails)
+  const openThread = useAppStore((s) => s.openThread)
+  const messages = useAppStore((s) => s.messages)
+  const contacts = useAppStore((s) => s.contacts)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
 
   const [query, setQuery] = useState('')
@@ -23,23 +25,39 @@ export default function SearchOverlay(): React.JSX.Element | null {
 
   const trimmed = query.trim()
 
-  const results = useMemo((): Email[] => {
+  // Match subject, body, and every address/name a message carries — including the
+  // resolved contact name, so "Mom" finds mail from linda.schaefers@comcast.net
+  // as well as sent mail addressed to her. Results are whole conversations.
+  const results = useMemo((): Thread[] => {
     if (trimmed.length < 2) return []
     const q = trimmed.toLowerCase()
-    return filterByAccount(emails, activeAccountId)
-      .filter((e) =>
-        [e.subject, e.sender.name, e.sender.email, e.preview, e.body.join(' ')].some((text) =>
-          text.toLowerCase().includes(q)
-        )
-      )
-      .sort((a, b) => b.date.localeCompare(a.date))
+    const visible = filterByAccount(messages, activeAccountId)
+    const mailboxMatches = (m: Mailbox): boolean =>
+      m.address.toLowerCase().includes(q) ||
+      (m.name?.toLowerCase().includes(q) ?? false) ||
+      resolveMailbox(m, contacts).name.toLowerCase().includes(q)
+    const rootIds = new Set<string>()
+    for (const message of visible) {
+      if (
+        message.subject.toLowerCase().includes(q) ||
+        message.body.join(' ').toLowerCase().includes(q) ||
+        mailboxMatches(message.from) ||
+        message.to.some(mailboxMatches) ||
+        message.cc.some(mailboxMatches)
+      ) {
+        rootIds.add(threadRootId(message))
+      }
+    }
+    return buildThreads(visible)
+      .filter((t) => rootIds.has(t.id))
       .slice(0, 50)
-  }, [emails, activeAccountId, trimmed])
+  }, [messages, contacts, activeAccountId, trimmed])
 
   if (!searchOpen) return null
 
   return (
-    <div className="fixed inset-0 z-[60]">
+    // Above the composer (z-[60]) so Cmd+K works while composing; menus are z-[80]
+    <div className="fixed inset-0 z-[70]">
       <div className="absolute inset-0 bg-black/30" onClick={() => setSearchOpen(false)} />
       <motion.div
         initial={{ opacity: 0, y: -10 }}
@@ -73,13 +91,12 @@ export default function SearchOverlay(): React.JSX.Element | null {
               No results for &ldquo;{trimmed}&rdquo;
             </div>
           ) : (
-            results.map((email) => (
-              <EmailRow
-                key={email.id}
-                email={email}
+            results.map((thread) => (
+              <ThreadRow
+                key={thread.id}
+                thread={thread}
                 onClick={() => {
-                  if (email.folder === 'drafts') openCompose(email.id)
-                  else openEmail(email.id)
+                  openThread(thread.id)
                   setSearchOpen(false)
                 }}
               />

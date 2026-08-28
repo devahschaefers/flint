@@ -1,15 +1,17 @@
 export type DateBucket = 'Today' | 'Yesterday' | 'This Week' | 'Last Week' | 'Older'
 
-const DAY = 24 * 60 * 60 * 1000
-
 function startOfDay(d: Date): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
 }
 
+/** Midnight `n` calendar days before `d` — the Date ctor absorbs DST offset shifts. */
+function daysBefore(d: Date, n: number): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - n).getTime()
+}
+
 /** Monday-based start of the week containing `d`. */
 function startOfWeek(d: Date): number {
-  const dow = (d.getDay() + 6) % 7
-  return startOfDay(d) - dow * DAY
+  return daysBefore(d, (d.getDay() + 6) % 7)
 }
 
 export function dateBucket(iso: string, now: Date = new Date()): DateBucket {
@@ -17,10 +19,9 @@ export function dateBucket(iso: string, now: Date = new Date()): DateBucket {
   const today = startOfDay(now)
   const day = startOfDay(t)
   if (day >= today) return 'Today'
-  if (day >= today - DAY) return 'Yesterday'
-  const week = startOfWeek(now)
-  if (day >= week) return 'This Week'
-  if (day >= week - 7 * DAY) return 'Last Week'
+  if (day >= daysBefore(now, 1)) return 'Yesterday'
+  if (day >= startOfWeek(now)) return 'This Week'
+  if (day >= daysBefore(now, ((now.getDay() + 6) % 7) + 7)) return 'Last Week'
   return 'Older'
 }
 

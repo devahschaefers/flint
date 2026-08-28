@@ -20,7 +20,7 @@ import type { Account } from '../../data/types'
 import type { RailItem } from './IconRail'
 
 function accountInitials(account: Account): string {
-  const key = `${account.name} ${account.email}`.toLowerCase()
+  const key = `${account.name} ${account.identity.address}`.toLowerCase()
   if (key.includes('gmail')) return 'M'
   if (key.includes('icloud')) return 'DS'
   return account.name.charAt(0).toUpperCase()
@@ -168,7 +168,7 @@ export default function SidebarPanel(): React.JSX.Element {
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
   const railItem = useAppStore((s) => s.railItem)
   const setRailItem = useAppStore((s) => s.setRailItem)
-  const emails = useAppStore((s) => s.emails)
+  const messages = useAppStore((s) => s.messages)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const setAccount = useAppStore((s) => s.setAccount)
   const goInbox = useAppStore((s) => s.goInbox)
@@ -182,7 +182,8 @@ export default function SidebarPanel(): React.JSX.Element {
   // Escape handling lives in App.tsx's single ordered handler (search > composer > sidebar > back)
 
   const unreadCount = (accountId: string): number =>
-    emails.filter((e) => e.accountId === accountId && e.folder === 'inbox' && !e.read).length
+    messages.filter((m) => m.accountId === accountId && m.folder === 'inbox' && !m.flags.seen)
+      .length
 
   return (
     <AnimatePresence>

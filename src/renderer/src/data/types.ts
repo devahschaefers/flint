@@ -1,48 +1,77 @@
+/**
+ * Email primitives modeled on the real standards:
+ * - RFC 5322 name-addr mailboxes and message headers (From/To/Cc, Message-ID,
+ *   In-Reply-To, References)
+ * - IMAP-style flags (\Seen, \Flagged, \Answered) and folder placement
+ * Client-side concepts (smart-inbox category, importance) live alongside but
+ * are clearly separated from wire-format fields.
+ */
+
+/** RFC 5322 name-addr: optional display name + required address ("Mom <linda@comcast.net>") */
+export interface Mailbox {
+  name?: string
+  address: string
+}
+
 export type Category = 'notifications' | 'people' | 'invites'
 
-export type Folder = 'inbox' | 'trash' | 'spam' | 'sent' | 'drafts'
+/** IMAP-style mailbox placement. Archive is a real folder (what "done" moves mail to). */
+export type Folder = 'inbox' | 'archive' | 'sent' | 'drafts' | 'trash' | 'spam'
+
+/** IMAP-style per-message flags */
+export interface MessageFlags {
+  /** \Seen — read */
+  seen: boolean
+  /** \Flagged — surfaced in the UI as "pinned" */
+  flagged: boolean
+  /** \Answered — a reply was sent */
+  answered: boolean
+}
+
+/** One RFC 5322 message. Threads are derived from inReplyTo/references, never stored. */
+export interface Message {
+  /** Message-ID header, globally unique, "<unique@domain>" */
+  messageId: string
+  /** Message-ID of the direct parent, when this is a reply */
+  inReplyTo?: string
+  /** Ancestor Message-IDs, oldest first; thread root = references[0] ?? messageId */
+  references: string[]
+  from: Mailbox
+  to: Mailbox[]
+  cc: Mailbox[]
+  replyTo?: Mailbox
+  subject: string
+  /** Date header, ISO */
+  date: string
+  /** text/plain body as paragraphs */
+  body: string[]
+
+  // client-side state (not wire headers)
+  accountId: string
+  folder: Folder
+  flags: MessageFlags
+  /** Spark-style smart-inbox classification */
+  category: Category
+  important: boolean
+}
+
+/**
+ * Address-book entry. Keyed by lowercase address. `seed` = pre-existing contact;
+ * `collected` = auto-learned from correspondence (like Gmail's "other contacts").
+ */
+export interface Contact {
+  address: string
+  name: string
+  source: 'seed' | 'collected'
+}
 
 export interface Account {
   id: string
+  /** Short UI label ("Gmail") */
   name: string
-  email: string
+  /** What outgoing mail is From: ("Devah Schaefers <devah.schaefers@gmail.com>") */
+  identity: Mailbox
   color: string
-}
-
-export interface Sender {
-  name: string
-  email: string
-  color: string
-  initials: string
-}
-
-export interface EmailReply {
-  /** ISO timestamp */
-  date: string
-  body: string[]
-}
-
-export interface Email {
-  id: string
-  accountId: string
-  /** For sent mail and drafts this is the recipient (what the list row should display) */
-  sender: Sender
-  subject: string
-  preview: string
-  /** Full message body as paragraphs; preview is the start of the first one */
-  body: string[]
-  /** ISO timestamp */
-  date: string
-  category: Category
-  read: boolean
-  /** Important emails surface directly in the Focused list instead of a group */
-  important: boolean
-  pinned: boolean
-  folder: Folder
-  /** Done = archived: hidden from lists unless "show done" is on; lives in the Archive list */
-  done: boolean
-  /** Replies Devah has sent on this thread, rendered below the body */
-  replies: EmailReply[]
 }
 
 export const CATEGORY_LABELS: Record<Category, string> = {

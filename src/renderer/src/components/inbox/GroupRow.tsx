@@ -1,11 +1,13 @@
 import { Bell, CalendarDays, Check, ChevronRight, Users, type LucideIcon } from 'lucide-react'
-import { CATEGORY_LABELS, type Category, type Email, type Sender } from '../../data/types'
+import { CATEGORY_LABELS, type Category, type Mailbox } from '../../data/types'
+import { resolveMailbox } from '../../lib/identity'
+import type { Thread } from '../../lib/threads'
 import { cn } from '../../lib/utils'
-import { useAppStore } from '../../store'
+import { isOwnAddress, useAppStore } from '../../store'
 
 interface GroupRowProps {
   category: Category
-  emails: Email[]
+  threads: Thread[]
   onOpen: () => void
 }
 
@@ -16,31 +18,41 @@ const CATEGORY_STYLES: Record<Category, { chip: string; icon: string; Icon: Luci
 }
 
 interface Chip {
-  sender: Sender
+  mailbox: Mailbox
+  /** Threads this identity spans */
   count: number
   unread: boolean
 }
 
-/** Dedupe by sender name keeping the newest email's sender (input is newest-first). */
-function senderChips(emails: Email[]): Chip[] {
-  const byName = new Map<string, Chip>()
-  for (const email of emails) {
-    const chip = byName.get(email.sender.name)
+/**
+ * One chip per counterpart identity across threads, deduped by address
+ * (newest first — input threads are already newest-first). A pure-sent thread
+ * falls back to its first recipient.
+ */
+function counterpartChips(threads: Thread[]): Chip[] {
+  const byAddress = new Map<string, Chip>()
+  for (const thread of threads) {
+    const counterpart = [...thread.messages].reverse().find((m) => !isOwnAddress(m.from.address))
+    const mailbox = counterpart?.from ?? thread.latest.to[0]
+    if (!mailbox) continue
+    const key = mailbox.address.toLowerCase()
+    const chip = byAddress.get(key)
     if (chip) {
       chip.count += 1
-      chip.unread = chip.unread || !email.read
+      chip.unread = chip.unread || thread.unread
     } else {
-      byName.set(email.sender.name, { sender: email.sender, count: 1, unread: !email.read })
+      byAddress.set(key, { mailbox, count: 1, unread: thread.unread })
     }
   }
-  return [...byName.values()].slice(0, 6)
+  return [...byAddress.values()].slice(0, 6)
 }
 
-export default function GroupRow({ category, emails, onOpen }: GroupRowProps): React.JSX.Element {
-  const markDone = useAppStore((s) => s.markDone)
+export default function GroupRow({ category, threads, onOpen }: GroupRowProps): React.JSX.Element {
+  const contacts = useAppStore((s) => s.contacts)
+  const archiveThreads = useAppStore((s) => s.archiveThreads)
   const { chip, icon, Icon } = CATEGORY_STYLES[category]
-  const hasUnread = emails.some((e) => !e.read)
-  const chips = senderChips(emails)
+  const hasUnread = threads.some((t) => t.unread)
+  const chips = counterpartChips(threads)
 
   return (
     <button
@@ -56,7 +68,7 @@ export default function GroupRow({ category, emails, onOpen }: GroupRowProps): R
           title="Mark all done"
           onClick={(e) => {
             e.stopPropagation()
-            markDone(emails.map((email) => email.id))
+            archiveThreads(threads.map((thread) => thread.id))
           }}
           className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted opacity-0 hover:border-text-secondary group-hover:opacity-100"
         >
@@ -72,25 +84,28 @@ export default function GroupRow({ category, emails, onOpen }: GroupRowProps): R
         <span className="text-[13px] font-semibold text-text-primary">
           {CATEGORY_LABELS[category]}
         </span>
-        <span className="ml-1.5 text-[13px] text-text-secondary">{emails.length}</span>
+        <span className="ml-1.5 text-[13px] text-text-secondary">{threads.length}</span>
       </span>
 
       <span className="flex min-w-0 flex-1 items-center gap-[18px] overflow-hidden">
-        {chips.map(({ sender, count, unread }) => (
-          <span key={sender.name} className="flex shrink-0 items-center gap-1.5">
-            {unread && <span className="h-[6px] w-[6px] rounded-full bg-blue-3" />}
-            <span
-              className="flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-semibold text-white ring-1 ring-elevation-1"
-              style={{ backgroundColor: sender.color }}
-            >
-              {sender.initials}
+        {chips.map(({ mailbox, count, unread }) => {
+          const identity = resolveMailbox(mailbox, contacts)
+          return (
+            <span key={mailbox.address.toLowerCase()} className="flex shrink-0 items-center gap-1.5">
+              {unread && <span className="h-[6px] w-[6px] rounded-full bg-blue-3" />}
+              <span
+                className="flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-semibold text-white ring-1 ring-elevation-1"
+                style={{ backgroundColor: identity.color }}
+              >
+                {identity.initials}
+              </span>
+              <span className="whitespace-nowrap text-[13px] text-text-primary">
+                {identity.name}
+                {count > 1 && <span className="text-xs text-text-secondary"> {count}</span>}
+              </span>
             </span>
-            <span className="whitespace-nowrap text-[13px] text-text-primary">
-              {sender.name}
-              {count > 1 && <span className="text-xs text-text-secondary"> {count}</span>}
-            </span>
-          </span>
-        ))}
+          )
+        })}
       </span>
 
       <ChevronRight size={15} className="absolute right-[12px] text-text-secondary" />

@@ -6,7 +6,7 @@ import ComposerModal from './components/compose/ComposerModal'
 import SmartInboxView from './views/SmartInboxView'
 import GroupListView from './views/GroupListView'
 import FolderListView from './views/FolderListView'
-import EmailView from './views/EmailView'
+import ThreadView from './views/ThreadView'
 import SettingsView from './views/SettingsView'
 import { useAppStore } from './store'
 
@@ -38,7 +38,7 @@ export default function App(): React.JSX.Element {
         } else if (s.sidebarOpen) {
           e.preventDefault()
           s.setSidebarOpen(false)
-        } else if (s.view.name === 'email' || s.view.name === 'settings') {
+        } else if (s.view.name === 'thread' || s.view.name === 'settings') {
           e.preventDefault()
           s.back()
         }
@@ -52,7 +52,8 @@ export default function App(): React.JSX.Element {
         s.setSearchOpen(true)
         return
       }
-      if (mod && e.key.toLowerCase() === 'n') {
+      // Inert while a compose window is open — re-opening would wipe unsaved edits
+      if (mod && e.key.toLowerCase() === 'n' && !s.composer.open) {
         e.preventDefault()
         s.openCompose()
       }
@@ -70,7 +71,7 @@ export default function App(): React.JSX.Element {
         {view.name === 'inbox' && <SmartInboxView />}
         {view.name === 'group' && <GroupListView category={view.category} />}
         {view.name === 'folder' && <FolderListView folder={view.folder} />}
-        {view.name === 'email' && <EmailView emailId={view.emailId} />}
+        {view.name === 'thread' && <ThreadView key={view.threadId} threadId={view.threadId} />}
         {view.name === 'settings' && <SettingsView />}
       </main>
       <SidebarPanel />

@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { ChevronDown, X } from 'lucide-react'
 import { accounts } from '../../data/mock'
+import { formatAddressList, parseAddressList } from '../../lib/address'
+import { resolveMailbox } from '../../lib/identity'
 import { useAppStore } from '../../store'
 import {
   DropdownMenu,
@@ -13,25 +15,29 @@ import {
 /** Global compose window: opened from HeaderControls (pen) or a draft row. Store-driven. */
 export default function ComposerModal(): React.JSX.Element | null {
   const composer = useAppStore((s) => s.composer)
-  const sendEmail = useAppStore((s) => s.sendEmail)
+  const sendMessage = useAppStore((s) => s.sendMessage)
   const saveDraft = useAppStore((s) => s.saveDraft)
+  const deleteDraft = useAppStore((s) => s.deleteDraft)
   const closeCompose = useAppStore((s) => s.closeCompose)
+  const contacts = useAppStore((s) => s.contacts)
   const draft = useAppStore((s) =>
-    s.composer.draftId ? s.emails.find((e) => e.id === s.composer.draftId) : undefined
+    s.composer.draftId ? s.messages.find((m) => m.messageId === s.composer.draftId) : undefined
   )
 
   const [to, setTo] = useState('')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
-  const [accountId, setAccountId] = useState('gmail')
+  const [accountId, setAccountId] = useState(accounts[0].id)
 
   // Prefill from the draft being edited, or reset for a fresh message, each time it opens
   useEffect(() => {
     if (!composer.open) return
-    const { emails, activeAccountId } = useAppStore.getState()
-    const editing = composer.draftId ? emails.find((e) => e.id === composer.draftId) : undefined
+    const { messages, activeAccountId } = useAppStore.getState()
+    const editing = composer.draftId
+      ? messages.find((m) => m.messageId === composer.draftId)
+      : undefined
     if (editing) {
-      setTo(editing.sender.email)
+      setTo(formatAddressList(editing.to))
       setSubject(editing.subject)
       setBody(editing.body.join('\n\n'))
       setAccountId(editing.accountId)
@@ -39,16 +45,23 @@ export default function ComposerModal(): React.JSX.Element | null {
       setTo('')
       setSubject('')
       setBody('')
-      setAccountId(activeAccountId !== 'all' ? activeAccountId : 'gmail')
+      setAccountId(activeAccountId !== 'all' ? activeAccountId : accounts[0].id)
     }
   }, [composer.open, composer.draftId])
 
+  // Live parse of the raw RFC 5322 To text — resolved chips preview the recipients
+  const recipients = useMemo(() => parseAddressList(to), [to])
+
   const hasContent = to.trim() !== '' || subject.trim() !== '' || body.trim() !== ''
+  /** Sending requires at least one parseable recipient; drafts don't. */
+  const canSend = hasContent && recipients.length > 0
 
   const handleClose = (): void => {
     if (hasContent) {
       saveDraft({ to, subject, body, accountId, draftId: composer.draftId })
     } else {
+      // Closing a draft after clearing every field deletes it, like real clients
+      if (composer.draftId) deleteDraft(composer.draftId)
       closeCompose()
     }
   }
@@ -74,8 +87,8 @@ export default function ComposerModal(): React.JSX.Element | null {
   const fromAccount = accounts.find((a) => a.id === accountId) ?? accounts[0]
 
   const handleSend = (): void => {
-    if (!hasContent) return
-    sendEmail({ to, subject, body, accountId, draftId: composer.draftId })
+    if (!canSend) return
+    sendMessage({ to, subject, body, accountId, draftId: composer.draftId })
   }
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
@@ -110,38 +123,74 @@ export default function ComposerModal(): React.JSX.Element | null {
 
         <div className="flex h-10 shrink-0 items-center gap-3 border-b border-white/5 px-4">
           <span className="text-[13px] text-text-muted">From</span>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 text-[13px] text-text-primary outline-none">
-                <span
-                  className="h-2.5 w-2.5 rounded-full"
-                  style={{ backgroundColor: fromAccount.color }}
-                />
-                {fromAccount.name}
-                <ChevronDown size={14} className="text-text-muted" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              {accounts.map((account) => (
-                <DropdownMenuItem key={account.id} onSelect={() => setAccountId(account.id)}>
+          {draft?.inReplyTo ? (
+            // A reply draft stays on the account that owns its thread — switching
+            // accounts would split the conversation across account filters.
+            <div className="flex items-center gap-2 text-[13px] text-text-primary">
+              <span
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: fromAccount.color }}
+              />
+              {fromAccount.name}
+              <span className="text-text-muted">· {fromAccount.identity.address}</span>
+            </div>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 text-[13px] text-text-primary outline-none">
                   <span
                     className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: account.color }}
+                    style={{ backgroundColor: fromAccount.color }}
                   />
-                  {account.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  {fromAccount.name}
+                  <span className="text-text-muted">· {fromAccount.identity.address}</span>
+                  <ChevronDown size={14} className="text-text-muted" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {accounts.map((account) => (
+                  <DropdownMenuItem key={account.id} onSelect={() => setAccountId(account.id)}>
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: account.color }}
+                    />
+                    {account.name}
+                    <span className="text-text-muted">· {account.identity.address}</span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
-        <div className="flex h-10 shrink-0 items-center border-b border-white/5 px-4">
-          <input
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            placeholder="To"
-            className="select-text flex-1 bg-transparent text-[13px] text-text-primary outline-none placeholder:text-text-muted"
-          />
+        <div className="shrink-0 border-b border-white/5 px-4">
+          <div className="flex h-10 items-center">
+            <input
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder="To"
+              className="select-text flex-1 bg-transparent text-[13px] text-text-primary outline-none placeholder:text-text-muted"
+            />
+          </div>
+          {recipients.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pb-2.5">
+              {recipients.map((mailbox, i) => {
+                const identity = resolveMailbox(mailbox, contacts)
+                return (
+                  <span
+                    key={`${mailbox.address}-${i}`}
+                    className="flex items-center gap-1.5 rounded-full bg-elevation-2 py-[3px] pl-2 pr-2.5 text-[11px] text-text-secondary"
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: identity.color }}
+                    />
+                    {identity.name}
+                  </span>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         <div className="flex h-10 shrink-0 items-center border-b border-white/5 px-4">
@@ -163,7 +212,7 @@ export default function ComposerModal(): React.JSX.Element | null {
         <div className="flex h-14 shrink-0 items-center gap-3 px-4">
           <button
             onClick={handleSend}
-            disabled={!hasContent}
+            disabled={!canSend}
             className="h-8 rounded-[8px] bg-blue-4 px-5 text-[13px] font-semibold text-white transition-colors duration-150 hover:bg-blue-3 disabled:opacity-40"
           >
             Send
