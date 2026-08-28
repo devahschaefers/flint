@@ -162,7 +162,7 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
               toggleArchiveThread(threadId)
               back()
             }}
-            className="flex h-[28px] w-[34px] items-center justify-center rounded-r-[8px] bg-elevation-2 text-text-bright transition-colors hover:text-ink"
+            className="flex h-[28px] w-[34px] items-center justify-center rounded-r-[8px] bg-elevation-2 text-text-bright transition-colors hover:bg-green-3 hover:text-white"
           >
             <Check size={15} />
           </button>

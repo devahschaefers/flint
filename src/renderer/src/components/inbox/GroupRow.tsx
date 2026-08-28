@@ -70,9 +70,9 @@ export default function GroupRow({ category, threads, onOpen }: GroupRowProps): 
             e.stopPropagation()
             archiveThreads(threads.map((thread) => thread.id))
           }}
-          className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted opacity-0 hover:border-text-secondary group-hover:opacity-100"
+          className="flex h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted text-text-muted opacity-0 transition-colors hover:border-green-3 hover:bg-green-3 hover:text-white group-hover:opacity-100"
         >
-          <Check size={11} className="text-text-muted" />
+          <Check size={11} />
         </span>
         {hasUnread && <span className="h-2 w-2 rounded-full bg-blue-3" />}
         <span className={cn('flex h-[26px] w-[26px] items-center justify-center rounded-full', chip)}>

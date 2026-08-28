@@ -70,9 +70,9 @@ export default function ThreadRow({ thread, onClick }: ThreadRowProps): React.JS
                   e.stopPropagation()
                   toggleArchiveThread(thread.id)
                 }}
-                className="flex h-4 w-4 items-center justify-center rounded-full bg-text-muted"
+                className="flex h-4 w-4 items-center justify-center rounded-full bg-text-muted text-elevation-0 transition-colors hover:bg-blue-4 hover:text-white"
               >
-                <Check size={10} strokeWidth={3} className="text-elevation-0" />
+                <Check size={10} strokeWidth={3} />
               </span>
             ) : (
               <>
@@ -86,9 +86,9 @@ export default function ThreadRow({ thread, onClick }: ThreadRowProps): React.JS
                     e.stopPropagation()
                     toggleArchiveThread(thread.id)
                   }}
-                  className="hidden h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted hover:border-text-secondary group-hover:flex"
+                  className="hidden h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted text-text-muted transition-colors hover:border-green-3 hover:bg-green-3 hover:text-white group-hover:flex"
                 >
-                  <Check size={11} className="text-text-muted" />
+                  <Check size={11} />
                 </span>
               </>
             )}
