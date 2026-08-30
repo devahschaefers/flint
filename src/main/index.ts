@@ -7,7 +7,10 @@ import { registerIpc } from './ipc'
 import { syncEngine } from './sync'
 
 if (is.dev) {
-  app.commandLine.appendSwitch('remote-debugging-port', '9223')
+  app.commandLine.appendSwitch(
+    'remote-debugging-port',
+    process.env['DEBUG_PORT'] ?? '9223'
+  )
 }
 
 function createWindow(): void {
