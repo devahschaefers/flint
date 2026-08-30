@@ -1,11 +1,5 @@
 import { create } from 'zustand'
 import type { Account, Category, Contact, Folder, Mailbox, Message } from './data/types'
-import {
-  accounts as mockAccounts,
-  messages as mockMessages,
-  seedContacts,
-  makeIncomingMessage
-} from './data/mock'
 import { parseAddressList } from './lib/address'
 import { threadRootId } from './lib/threads'
 import { deriveContacts, wireToAccount, wireToMessage } from './lib/wire'
@@ -147,7 +141,7 @@ interface AppState {
   sidebarOpen: boolean
   activeAccountId: string
   accounts: Account[]
-  /** True once at least one real account is connected; mock data otherwise */
+  /** True once at least one account is connected */
   connected: boolean
   messages: Message[]
   contacts: Contact[]
@@ -158,7 +152,7 @@ interface AppState {
   signature: string
   refreshCount: number
 
-  /** Hydrate accounts + mail from the local DB; falls back to mock data when none */
+  /** Hydrate accounts + mail from the local DB (empty state when no account) */
   init: () => Promise<void>
 
   // navigation
@@ -205,10 +199,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   railItem: 'inbox',
   sidebarOpen: false,
   activeAccountId: 'all',
-  accounts: mockAccounts,
+  accounts: [],
   connected: false,
-  messages: mockMessages,
-  contacts: seedContacts,
+  messages: [],
+  contacts: [],
   hideDone: true,
   searchOpen: false,
   composer: { open: false, draftId: null },
@@ -221,9 +215,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     if (wireAccounts.length === 0) {
       set({
         connected: false,
-        accounts: mockAccounts,
-        messages: mockMessages,
-        contacts: seedContacts,
+        accounts: [],
+        messages: [],
+        contacts: [],
         activeAccountId: 'all'
       })
       return
@@ -232,7 +226,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((s) => ({
       connected: true,
       accounts: accs,
-      // Drop whatever was on screen (mock data on first connect); reload refills
+      // Drop whatever was on screen; reload refills
       messages: [],
       contacts: [],
       activeAccountId:
@@ -354,6 +348,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   sendMessage: ({ to, subject, body, html, accountId, draftId }) =>
     set((s) => {
       const account = s.accounts.find((a) => a.id === accountId) ?? s.accounts[0]
+      if (!account) return {}
       const recipients = parseAddressList(to)
       // Sending a draft keeps its threading chain (In-Reply-To/References) and
       // category, exactly as saveDraft preserved them.
@@ -393,6 +388,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   saveDraft: ({ to, subject, body, html, accountId, draftId }) =>
     set((s) => {
       const account = s.accounts.find((a) => a.id === accountId) ?? s.accounts[0]
+      if (!account) return {}
       const existing = draftId ? s.messages.find((m) => m.messageId === draftId) : undefined
       const draft: Message = {
         messageId: draftId ?? makeMessageId(),
@@ -430,6 +426,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       ? target.to
       : [target.replyTo ?? target.from]
     const account = s.accounts.find((a) => a.id === target.accountId) ?? s.accounts[0]
+    if (!account) return null
     const reply: Message = {
       messageId: makeMessageId(),
       inReplyTo: latest.messageId,
@@ -481,15 +478,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     window.setTimeout(() => get().sendReply(threadId, body, html), delayMs)
   },
   refreshInbox: () => {
-    if (get().connected) {
-      void window.api.refresh().catch((err) => console.error('refresh failed:', err))
-      set((s) => ({ refreshCount: s.refreshCount + 1 }))
-      return
-    }
-    set((s) => ({
-      messages: [makeIncomingMessage(s.messages.length), ...s.messages],
-      refreshCount: s.refreshCount + 1
-    }))
+    if (!get().connected) return
+    void window.api.refresh().catch((err) => console.error('refresh failed:', err))
+    set((s) => ({ refreshCount: s.refreshCount + 1 }))
   },
 
   toggleHideDone: () => set((s) => ({ hideDone: !s.hideDone })),

@@ -9,7 +9,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import { useAppStore } from './store'
 
-// Hydrate from the local mail store (falls back to mock data when no account is connected)
+// Hydrate accounts and mail from the local store
 void useAppStore.getState().init()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -29,7 +29,7 @@ export default function ComposerModal(): React.JSX.Element | null {
 
   const [to, setTo] = useState('')
   const [subject, setSubject] = useState('')
-  const [accountId, setAccountId] = useState(accounts[0].id)
+  const [accountId, setAccountId] = useState(accounts[0]?.id ?? '')
 
   const editor = useComposeEditor({
     placeholder: 'Write something...',
@@ -53,7 +53,7 @@ export default function ComposerModal(): React.JSX.Element | null {
       setTo('')
       setSubject('')
       editor.commands.clearContent()
-      setAccountId(activeAccountId !== 'all' ? activeAccountId : accounts[0].id)
+      setAccountId(activeAccountId !== 'all' ? activeAccountId : (accounts[0]?.id ?? ''))
     }
   }, [composer.open, composer.draftId, editor])
 
@@ -106,6 +106,8 @@ export default function ComposerModal(): React.JSX.Element | null {
   if (!composer.open) return null
 
   const fromAccount = accounts.find((a) => a.id === accountId) ?? accounts[0]
+  // No connected account: nothing to compose from
+  if (!fromAccount) return null
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

@@ -171,7 +171,7 @@ function AccountsSection(): React.JSX.Element {
         {error && <div className="px-4 py-3 text-[12px] text-red-3">{error}</div>}
         {!connected && (
           <div className="px-4 py-3 text-[11px] text-text-muted">
-            No real account connected — the app is showing sample data.
+            No account connected yet — add your Gmail to start syncing.
           </div>
         )}
       </Section>
@@ -351,7 +351,7 @@ export default function SettingsView(): React.JSX.Element {
 
           <Section label="About">
             <div className="flex h-12 items-center px-4 text-[12px] text-text-secondary">
-              Spark clone · v0.1.0 · {connected ? 'live Gmail data' : 'mock data'}
+              Spark clone · v0.1.0 · {connected ? 'live Gmail data' : 'no account connected'}
             </div>
           </Section>
         </div>
