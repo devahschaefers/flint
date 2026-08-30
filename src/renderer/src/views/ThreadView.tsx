@@ -7,6 +7,7 @@ import { resolveMailbox, resolveNames } from '../lib/identity'
 import { isOwnAddress, useAppStore } from '../store'
 import { cn } from '../lib/utils'
 import HeaderControls from '../components/inbox/HeaderControls'
+import ReplyComposer from '../components/compose/ReplyComposer'
 import type { Contact, Message } from '../data/types'
 
 interface ThreadViewProps {
@@ -53,13 +54,18 @@ function MessageBlock({ message, contacts, isDraft }: MessageBlockProps): React.
         </span>
       </div>
 
-      <div className="mt-4">
-        {message.body.map((paragraph, i) => (
-          <p key={i} className="text-[14px] leading-[1.65] text-[#c6c9cd] mb-4">
-            {paragraph}
-          </p>
-        ))}
-      </div>
+      {message.bodyHtml ? (
+        // Our own rich-composed markup (the message's text/html part)
+        <div className="rt mt-4" dangerouslySetInnerHTML={{ __html: message.bodyHtml }} />
+      ) : (
+        <div className="mt-4">
+          {message.body.map((paragraph, i) => (
+            <p key={i} className="text-[14px] leading-[1.65] text-[#c6c9cd] mb-4">
+              {paragraph}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -93,11 +99,8 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
   const back = useAppStore((s) => s.back)
   const toggleArchiveThread = useAppStore((s) => s.toggleArchiveThread)
   const toggleFlagged = useAppStore((s) => s.toggleFlagged)
-  const sendReply = useAppStore((s) => s.sendReply)
   const openCompose = useAppStore((s) => s.openCompose)
 
-  const [replyOpen, setReplyOpen] = useState(false)
-  const [replyText, setReplyText] = useState('')
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set())
 
   const thread = useMemo(
@@ -118,20 +121,6 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
       })()
     : null
   const replyLabel = replyName ? `Reply to ${replyName}...` : 'Reply...'
-
-  const canSend = replyText.trim().length > 0
-
-  const handleSend = (): void => {
-    if (!canSend) return
-    sendReply(threadId, replyText)
-    setReplyText('')
-    setReplyOpen(false)
-  }
-
-  const handleCancel = (): void => {
-    setReplyText('')
-    setReplyOpen(false)
-  }
 
   const expandMessage = (messageId: string): void => {
     setExpandedIds((prev) => new Set([...prev, messageId]))
@@ -228,48 +217,7 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
       </div>
 
       <div className="absolute bottom-[22px] left-1/2 w-[calc(100%-60px)] max-w-[860px] -translate-x-1/2">
-        {replyOpen ? (
-          <div className="rounded-[14px] border border-white/10 bg-elevation-1 p-3 shadow-[0_4px_15px_rgba(0,0,0,0.25)]">
-            <textarea
-              autoFocus
-              value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                  e.preventDefault()
-                  handleSend()
-                }
-              }}
-              placeholder={replyLabel}
-              className="select-text min-h-[96px] w-full resize-none bg-transparent text-[13px] text-text-primary outline-none placeholder:text-text-secondary"
-            />
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={handleCancel}
-                className="h-7 rounded-[7px] px-3 text-[12px] text-text-secondary transition-colors hover:text-text-primary"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSend}
-                disabled={!canSend}
-                className={cn(
-                  'h-7 rounded-[7px] bg-blue-4 px-4 text-[12px] font-semibold text-white transition-colors hover:bg-blue-3',
-                  !canSend && 'cursor-default opacity-40 hover:bg-blue-4'
-                )}
-              >
-                Send
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => setReplyOpen(true)}
-            className="flex h-[44px] w-full items-center rounded-[22px] border border-white/10 bg-elevation-1 px-4 text-[13px] text-text-secondary shadow-[0_4px_15px_rgba(0,0,0,0.25)] transition-colors hover:bg-elevation-2"
-          >
-            {replyLabel}
-          </button>
-        )}
+        <ReplyComposer threadId={threadId} replyLabel={replyLabel} />
       </div>
     </motion.div>
   )

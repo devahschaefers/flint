@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
+import { useEditorState } from '@tiptap/react'
 import { ChevronDown, X } from 'lucide-react'
 import { accounts } from '../../data/mock'
 import { formatAddressList, parseAddressList } from '../../lib/address'
 import { resolveMailbox } from '../../lib/identity'
 import { useAppStore } from '../../store'
+import { paragraphsToHtml, RichEditorContent, useComposeEditor } from './RichEditor'
+import Toolbar from './Toolbar'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,12 +29,17 @@ export default function ComposerModal(): React.JSX.Element | null {
 
   const [to, setTo] = useState('')
   const [subject, setSubject] = useState('')
-  const [body, setBody] = useState('')
   const [accountId, setAccountId] = useState(accounts[0].id)
+
+  const editor = useComposeEditor({
+    placeholder: 'Write something...',
+    onSend: () => handleSendRef.current()
+  })
+  const bodyText = useEditorState({ editor, selector: (ctx) => ctx.editor?.getText() ?? '' })
 
   // Prefill from the draft being edited, or reset for a fresh message, each time it opens
   useEffect(() => {
-    if (!composer.open) return
+    if (!composer.open || !editor) return
     const { messages, activeAccountId } = useAppStore.getState()
     const editing = composer.draftId
       ? messages.find((m) => m.messageId === composer.draftId)
@@ -39,26 +47,32 @@ export default function ComposerModal(): React.JSX.Element | null {
     if (editing) {
       setTo(formatAddressList(editing.to))
       setSubject(editing.subject)
-      setBody(editing.body.join('\n\n'))
+      editor.commands.setContent(editing.bodyHtml ?? paragraphsToHtml(editing.body))
       setAccountId(editing.accountId)
     } else {
       setTo('')
       setSubject('')
-      setBody('')
+      editor.commands.clearContent()
       setAccountId(activeAccountId !== 'all' ? activeAccountId : accounts[0].id)
     }
-  }, [composer.open, composer.draftId])
+  }, [composer.open, composer.draftId, editor])
 
   // Live parse of the raw RFC 5322 To text — resolved chips preview the recipients
   const recipients = useMemo(() => parseAddressList(to), [to])
 
+  const body = bodyText ?? ''
   const hasContent = to.trim() !== '' || subject.trim() !== '' || body.trim() !== ''
   /** Sending requires at least one parseable recipient; drafts don't. */
   const canSend = hasContent && recipients.length > 0
 
+  const richInput = (): { body: string; html?: string } => ({
+    body: editor?.getText() ?? '',
+    html: editor && editor.getText().trim() ? editor.getHTML() : undefined
+  })
+
   const handleClose = (): void => {
     if (hasContent) {
-      saveDraft({ to, subject, body, accountId, draftId: composer.draftId })
+      saveDraft({ to, subject, ...richInput(), accountId, draftId: composer.draftId })
     } else {
       // Closing a draft after clearing every field deletes it, like real clients
       if (composer.draftId) deleteDraft(composer.draftId)
@@ -82,14 +96,16 @@ export default function ComposerModal(): React.JSX.Element | null {
     return (): void => window.removeEventListener('keydown', onKey)
   }, [composer.open])
 
+  const handleSend = (): void => {
+    if (!canSend) return
+    sendMessage({ to, subject, ...richInput(), accountId, draftId: composer.draftId })
+  }
+  const handleSendRef = useRef(handleSend)
+  handleSendRef.current = handleSend
+
   if (!composer.open) return null
 
   const fromAccount = accounts.find((a) => a.id === accountId) ?? accounts[0]
-
-  const handleSend = (): void => {
-    if (!canSend) return
-    sendMessage({ to, subject, body, accountId, draftId: composer.draftId })
-  }
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -202,12 +218,8 @@ export default function ComposerModal(): React.JSX.Element | null {
           />
         </div>
 
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Write something..."
-          className="select-text min-h-[220px] flex-1 resize-none bg-transparent p-4 text-[13px] text-text-primary outline-none placeholder:text-text-muted"
-        />
+        <Toolbar editor={editor} className="shrink-0" />
+        <RichEditorContent editor={editor} className="min-h-[220px] flex-1" />
 
         <div className="flex h-14 shrink-0 items-center gap-3 px-4">
           <button
@@ -218,12 +230,16 @@ export default function ComposerModal(): React.JSX.Element | null {
             Send
           </button>
           <button
-            onClick={() => saveDraft({ to, subject, body, accountId, draftId: composer.draftId })}
+            onClick={() =>
+              saveDraft({ to, subject, ...richInput(), accountId, draftId: composer.draftId })
+            }
             disabled={!hasContent}
             className="text-[13px] text-text-secondary transition-colors duration-150 hover:text-ink disabled:opacity-40 disabled:hover:text-text-secondary"
           >
             Save draft
           </button>
+          <span className="flex-1" />
+          <span className="text-[11px] text-text-muted"># heading · / commands · ⌘↵ send</span>
         </div>
       </motion.div>
     </div>

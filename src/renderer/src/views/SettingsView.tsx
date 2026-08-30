@@ -35,6 +35,8 @@ export default function SettingsView(): React.JSX.Element {
   const back = useAppStore((s) => s.back)
   const hideDone = useAppStore((s) => s.hideDone)
   const toggleHideDone = useAppStore((s) => s.toggleHideDone)
+  const showWordCount = useAppStore((s) => s.showWordCount)
+  const toggleShowWordCount = useAppStore((s) => s.toggleShowWordCount)
   const signature = useAppStore((s) => s.signature)
   const setSignature = useAppStore((s) => s.setSignature)
   const contacts = useAppStore((s) => s.contacts)
@@ -126,6 +128,26 @@ export default function SettingsView(): React.JSX.Element {
                   className={cn(
                     'absolute top-[2px] flex h-[14px] w-[14px] items-center justify-center rounded-full bg-white transition-all duration-150',
                     hideDone ? 'left-[18px]' : 'left-[2px]'
+                  )}
+                >
+                  <Check size={10} strokeWidth={3} className="text-elevation-2" />
+                </span>
+              </button>
+            </div>
+            <div className="flex h-12 items-center px-4">
+              <span className="text-[13px] text-text-primary">Show word count while composing</span>
+              <button
+                aria-label={showWordCount ? 'Hide word count' : 'Show word count'}
+                onClick={toggleShowWordCount}
+                className={cn(
+                  'relative ml-auto h-[18px] w-[34px] rounded-full transition-colors duration-150',
+                  showWordCount ? 'bg-blue-4' : 'bg-elevation-3'
+                )}
+              >
+                <span
+                  className={cn(
+                    'absolute top-[2px] flex h-[14px] w-[14px] items-center justify-center rounded-full bg-white transition-all duration-150',
+                    showWordCount ? 'left-[18px]' : 'left-[2px]'
                   )}
                 >
                   <Check size={10} strokeWidth={3} className="text-elevation-2" />

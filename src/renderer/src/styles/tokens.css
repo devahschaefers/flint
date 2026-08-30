@@ -67,3 +67,98 @@ body {
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/*
+ * Rich message content (.rt) — shared by the compose editors and rendered
+ * text/html bodies in the thread view. Values from the rich-compose handoff.
+ */
+.rt {
+  font-size: 14px;
+  line-height: 1.65;
+  color: #c6c9cd;
+}
+.rt p {
+  margin-bottom: 12px;
+}
+.rt h2 {
+  margin: 14px 0 8px;
+  font-size: 19px;
+  font-weight: 700;
+  color: #fff;
+}
+.rt h3 {
+  margin: 12px 0 6px;
+  font-size: 15.5px;
+  font-weight: 600;
+  color: #fff;
+}
+.rt ul,
+.rt ol {
+  margin-bottom: 12px;
+  padding-left: 22px;
+}
+.rt ul {
+  list-style: disc;
+}
+.rt ol {
+  list-style: decimal;
+}
+.rt blockquote {
+  margin: 0 0 12px;
+  border-left: 3px solid var(--color-blue-4);
+  padding-left: 12px;
+  color: var(--color-text-secondary);
+}
+.rt pre {
+  margin: 0 0 12px;
+  overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: #17181b;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  color: #c6c9cd;
+}
+.rt strong {
+  color: #fff;
+}
+.rt a {
+  color: var(--color-blue-3);
+  text-decoration: underline;
+}
+.rt .imgph {
+  margin: 0 0 12px;
+  display: flex;
+  height: 110px;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.03),
+    rgba(255, 255, 255, 0.03) 8px,
+    transparent 8px,
+    transparent 16px
+  );
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.rt .imgph::after {
+  content: 'image placeholder';
+}
+
+/* Editor-only affordances */
+.rt-editor {
+  outline: none;
+  user-select: text;
+  cursor: text;
+}
+.rt-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  pointer-events: none;
+  float: left;
+  height: 0;
+  color: var(--color-text-muted);
+}

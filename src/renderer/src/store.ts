@@ -57,9 +57,21 @@ export interface ComposerInput {
   /** Raw To-field text; parsed as an RFC 5322 address list */
   to: string
   subject: string
+  /** Plain-text body (the text/plain part) */
   body: string
+  /** Rich body markup (the text/html part), when composed in the rich editor */
+  html?: string
   accountId: string
   draftId?: string | null
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** Append the signature to a rich body the same way it lands in the text part */
+function withSignatureHtml(html: string, signature: string): string {
+  return `${html}<p>${escapeHtml(signature)}</p>`
 }
 
 interface AppState {
@@ -97,7 +109,12 @@ interface AppState {
   deleteDraft: (messageId: string) => void
   sendMessage: (input: ComposerInput) => void
   saveDraft: (input: ComposerInput) => void
-  sendReply: (threadId: string, body: string) => void
+  /** Returns the sent reply's Message-ID (for undo), or null when nothing was sent */
+  sendReply: (threadId: string, body: string, html?: string) => string | null
+  /** Remove a just-sent message and revert the parent's \Answered flag (toast Undo) */
+  unsend: (messageId: string) => void
+  /** "Send later": fires sendReply after the delay (in-session scheduler) */
+  scheduleReply: (threadId: string, body: string, html: string | undefined, delayMs: number) => void
   refreshInbox: () => void
 
   // ui state
@@ -106,9 +123,11 @@ interface AppState {
   openCompose: (draftId?: string | null) => void
   closeCompose: () => void
   setSignature: (signature: string) => void
+  showWordCount: boolean
+  toggleShowWordCount: () => void
 }
 
-export const useAppStore = create<AppState>()((set) => ({
+export const useAppStore = create<AppState>()((set, get) => ({
   view: { name: 'inbox' },
   prevView: null,
   railItem: 'inbox',
@@ -206,7 +225,7 @@ export const useAppStore = create<AppState>()((set) => ({
     })),
   deleteDraft: (messageId) =>
     set((s) => ({ messages: s.messages.filter((m) => m.messageId !== messageId) })),
-  sendMessage: ({ to, subject, body, accountId, draftId }) =>
+  sendMessage: ({ to, subject, body, html, accountId, draftId }) =>
     set((s) => {
       const account = accounts.find((a) => a.id === accountId) ?? accounts[0]
       const recipients = parseAddressList(to)
@@ -223,6 +242,7 @@ export const useAppStore = create<AppState>()((set) => ({
         subject: subject || '(no subject)',
         date: new Date().toISOString(),
         body: [...toParagraphs(body), s.signature],
+        bodyHtml: html ? withSignatureHtml(html, s.signature) : undefined,
         accountId: account.id,
         folder: 'sent',
         flags: { seen: true, flagged: false, answered: false },
@@ -244,7 +264,7 @@ export const useAppStore = create<AppState>()((set) => ({
         composer: { open: false, draftId: null }
       }
     }),
-  saveDraft: ({ to, subject, body, accountId, draftId }) =>
+  saveDraft: ({ to, subject, body, html, accountId, draftId }) =>
     set((s) => {
       const account = accounts.find((a) => a.id === accountId) ?? accounts[0]
       const existing = draftId ? s.messages.find((m) => m.messageId === draftId) : undefined
@@ -258,6 +278,7 @@ export const useAppStore = create<AppState>()((set) => ({
         subject: subject || '(no subject)',
         date: new Date().toISOString(),
         body: toParagraphs(body),
+        bodyHtml: html,
         accountId: account.id,
         folder: 'drafts',
         flags: { seen: true, flagged: false, answered: false },
@@ -269,46 +290,70 @@ export const useAppStore = create<AppState>()((set) => ({
         composer: { open: false, draftId: null }
       }
     }),
-  sendReply: (threadId, body) =>
+  sendReply: (threadId, body, html) => {
+    const s = get()
+    if (!body.trim()) return null
+    const inThread = threadMessages(s.messages, threadId)
+    if (inThread.length === 0) return null
+    const latest = inThread[inThread.length - 1]
+    // Reply targets the latest counterpart message: its Reply-To/From, unless
+    // that is us (replying on our own sent thread) — then keep writing to its To.
+    const counterpart = [...inThread].reverse().find((m) => !isOwnAddress(m.from.address))
+    const target = counterpart ?? latest
+    const recipients = isOwnAddress(target.from.address)
+      ? target.to
+      : [target.replyTo ?? target.from]
+    const account = accounts.find((a) => a.id === target.accountId) ?? accounts[0]
+    const reply: Message = {
+      messageId: makeMessageId(),
+      inReplyTo: latest.messageId,
+      references: [...latest.references, latest.messageId],
+      from: account.identity,
+      to: recipients,
+      cc: [],
+      subject: latest.subject.match(/^re:/i) ? latest.subject : `Re: ${latest.subject}`,
+      date: new Date().toISOString(),
+      body: [...toParagraphs(body), s.signature],
+      bodyHtml: html ? withSignatureHtml(html, s.signature) : undefined,
+      accountId: account.id,
+      folder: 'sent',
+      flags: { seen: true, flagged: false, answered: false },
+      category: latest.category,
+      important: false
+    }
+    set({
+      messages: [
+        reply,
+        ...s.messages.map((m) =>
+          m.messageId === target.messageId ? { ...m, flags: { ...m.flags, answered: true } } : m
+        )
+      ],
+      contacts: collectContacts(s.contacts, recipients)
+    })
+    return reply.messageId
+  },
+  unsend: (messageId) =>
     set((s) => {
-      if (!body.trim()) return {}
-      const inThread = threadMessages(s.messages, threadId)
-      if (inThread.length === 0) return {}
-      const latest = inThread[inThread.length - 1]
-      // Reply targets the latest counterpart message: its Reply-To/From, unless
-      // that is us (replying on our own sent thread) — then keep writing to its To.
-      const counterpart = [...inThread].reverse().find((m) => !isOwnAddress(m.from.address))
-      const target = counterpart ?? latest
-      const recipients = isOwnAddress(target.from.address)
-        ? target.to
-        : [target.replyTo ?? target.from]
-      const account = accounts.find((a) => a.id === target.accountId) ?? accounts[0]
-      const reply: Message = {
-        messageId: makeMessageId(),
-        inReplyTo: latest.messageId,
-        references: [...latest.references, latest.messageId],
-        from: account.identity,
-        to: recipients,
-        cc: [],
-        subject: latest.subject.match(/^re:/i) ? latest.subject : `Re: ${latest.subject}`,
-        date: new Date().toISOString(),
-        body: [...toParagraphs(body), s.signature],
-        accountId: account.id,
-        folder: 'sent',
-        flags: { seen: true, flagged: false, answered: false },
-        category: latest.category,
-        important: false
-      }
+      const target = s.messages.find((m) => m.messageId === messageId)
+      if (!target || target.folder !== 'sent') return {}
+      const rest = s.messages.filter((m) => m.messageId !== messageId)
+      const parentId = target.inReplyTo
+      if (!parentId) return { messages: rest }
+      // \Answered stays only if another of our replies still points at the parent
+      const stillAnswered = rest.some(
+        (m) => m.inReplyTo === parentId && isOwnAddress(m.from.address)
+      )
       return {
-        messages: [
-          reply,
-          ...s.messages.map((m) =>
-            m.messageId === target.messageId ? { ...m, flags: { ...m.flags, answered: true } } : m
-          )
-        ],
-        contacts: collectContacts(s.contacts, recipients)
+        messages: rest.map((m) =>
+          m.messageId === parentId && !stillAnswered
+            ? { ...m, flags: { ...m.flags, answered: false } }
+            : m
+        )
       }
     }),
+  scheduleReply: (threadId, body, html, delayMs) => {
+    window.setTimeout(() => get().sendReply(threadId, body, html), delayMs)
+  },
   refreshInbox: () =>
     set((s) => ({
       messages: [makeIncomingMessage(s.messages.length), ...s.messages],
@@ -319,7 +364,9 @@ export const useAppStore = create<AppState>()((set) => ({
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   openCompose: (draftId = null) => set({ composer: { open: true, draftId } }),
   closeCompose: () => set({ composer: { open: false, draftId: null } }),
-  setSignature: (signature) => set({ signature })
+  setSignature: (signature) => set({ signature }),
+  showWordCount: true,
+  toggleShowWordCount: () => set((s) => ({ showWordCount: !s.showWordCount }))
 }))
 
 /** Messages visible under the current account filter */

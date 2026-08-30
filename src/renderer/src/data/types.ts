@@ -45,6 +45,8 @@ export interface Message {
   date: string
   /** text/plain body as paragraphs */
   body: string[]
+  /** text/html alternative part, when the message was composed rich */
+  bodyHtml?: string
 
   // client-side state (not wire headers)
   accountId: string
