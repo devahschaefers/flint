@@ -17,9 +17,9 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
-    // The lights span ~52px; keep all three on the 72px dark rail strip so the
-    // rail/content seam never cuts through them (x 19 put the green one on the seam)
-    trafficLightPosition: { x: 10, y: 20 },
+    // Center the light cluster on the 72px dark rail strip (the rendered cluster
+    // is ~60px wide, wider than the nominal 52 — measured from screenshots)
+    trafficLightPosition: { x: 7, y: 20 },
     backgroundColor: '#1F2124',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
