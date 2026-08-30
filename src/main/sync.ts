@@ -110,7 +110,7 @@ class SyncEngine {
     db.deleteAccount(accountId)
     this.tokens.delete(accountId)
     this.apis.delete(accountId)
-    this.notify(accountId)
+    this.notify()
   }
 
   startBackfill(accountId: string): void {
@@ -135,7 +135,7 @@ class SyncEngine {
         parsed.filter((p) => p !== null).map((p) => ({ ...p, accountId }))
       )
       db.setBackfillState(accountId, page.nextPageToken ?? null, !page.nextPageToken)
-      this.notify(accountId)
+      this.notify()
       if (!page.nextPageToken) {
         console.log(`[sync] backfill complete: ${db.countMessages(accountId)} messages`)
         return
@@ -212,7 +212,7 @@ class SyncEngine {
         throw err
       }
     }
-    if (changed) this.notify(accountId)
+    if (changed) this.notify()
   }
 
   private async recentResync(accountId: string): Promise<void> {
@@ -230,7 +230,7 @@ class SyncEngine {
     value?: boolean
   ): Promise<void> {
     db.applyLocalAction(accountId, gmailIds, action, value)
-    this.notify(accountId)
+    this.notify()
     const api = this.api(accountId)
     switch (action) {
       case 'seen':
@@ -280,7 +280,7 @@ class SyncEngine {
   }
 
   /** Trailing-edge throttle so backfill pages don't spam the renderer */
-  private notify(_accountId: string): void {
+  private notify(): void {
     if (this.notifyTimer) return
     this.notifyTimer = setTimeout(() => {
       this.notifyTimer = null

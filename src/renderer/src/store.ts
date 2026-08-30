@@ -1,8 +1,15 @@
 import { create } from 'zustand'
-import type { Category, Contact, Folder, Mailbox, Message } from './data/types'
-import { accounts, messages as mockMessages, seedContacts, makeIncomingMessage } from './data/mock'
+import type { Account, Category, Contact, Folder, Mailbox, Message } from './data/types'
+import {
+  accounts as mockAccounts,
+  messages as mockMessages,
+  seedContacts,
+  makeIncomingMessage
+} from './data/mock'
 import { parseAddressList } from './lib/address'
 import { threadRootId } from './lib/threads'
+import { deriveContacts, wireToAccount, wireToMessage } from './lib/wire'
+import type { MailAction } from '../../preload/index.d'
 import type { RailItem } from './components/sidebar/IconRail'
 
 /** Folder-style lists reachable from the rail/sidebar ('pins' = flagged, not a folder) */
@@ -22,7 +29,66 @@ export function makeMessageId(): string {
 /** Is this one of the user's own addresses? (used for sent rendering and reply targeting) */
 export function isOwnAddress(address: string): boolean {
   const key = address.toLowerCase()
-  return accounts.some((a) => a.identity.address.toLowerCase() === key)
+  return useAppStore.getState().accounts.some((a) => a.identity.address.toLowerCase() === key)
+}
+
+/** Cap on hydrated messages per account (server-side paged queries replace this later) */
+const WINDOW_PER_ACCOUNT = 1500
+
+function hasMailApi(): boolean {
+  return typeof window.api?.listAccounts === 'function'
+}
+
+/** Push a UI action to Gmail for the affected synced messages (fire-and-forget) */
+function remoteAction(affected: Message[], action: MailAction, value?: boolean): void {
+  if (!useAppStore.getState().connected) return
+  const byAccount = new Map<string, string[]>()
+  for (const m of affected) {
+    if (!m.gmailId) continue
+    byAccount.set(m.accountId, [...(byAccount.get(m.accountId) ?? []), m.gmailId])
+  }
+  for (const [accountId, gmailIds] of byAccount) {
+    window.api.mailAction({ accountId, gmailIds, action, value }).catch((err) => {
+      console.error('mail action failed:', err)
+    })
+  }
+}
+
+let reloading = false
+let reloadQueued = false
+/** Re-hydrate messages/contacts from the local DB, keeping unsynced local messages */
+async function reloadMail(): Promise<void> {
+  if (reloading) {
+    reloadQueued = true
+    return
+  }
+  reloading = true
+  try {
+    const wires = await window.api.getMailWindow(WINDOW_PER_ACCOUNT)
+    const s = useAppStore.getState()
+    if (!s.connected) return
+    const synced = wires.map(wireToMessage)
+    // Locally-composed mail (sent/drafts without a gmailId) survives reloads
+    const localOnly = s.messages.filter((m) => !m.gmailId)
+    const own = new Set(s.accounts.map((a) => a.identity.address.toLowerCase()))
+    useAppStore.setState({
+      messages: [...localOnly, ...synced],
+      contacts: deriveContacts(synced, own)
+    })
+  } finally {
+    reloading = false
+    if (reloadQueued) {
+      reloadQueued = false
+      void reloadMail()
+    }
+  }
+}
+
+let subscribed = false
+function subscribeOnce(): void {
+  if (subscribed || !hasMailApi()) return
+  subscribed = true
+  window.api.onMailChanged(() => void reloadMail())
 }
 
 function toParagraphs(text: string): string[] {
@@ -80,6 +146,9 @@ interface AppState {
   railItem: RailItem
   sidebarOpen: boolean
   activeAccountId: string
+  accounts: Account[]
+  /** True once at least one real account is connected; mock data otherwise */
+  connected: boolean
   messages: Message[]
   contacts: Contact[]
   /** When true (default) archived threads are hidden from the inbox lists */
@@ -88,6 +157,9 @@ interface AppState {
   composer: { open: boolean; draftId: string | null }
   signature: string
   refreshCount: number
+
+  /** Hydrate accounts + mail from the local DB; falls back to mock data when none */
+  init: () => Promise<void>
 
   // navigation
   openGroup: (category: Category) => void
@@ -133,6 +205,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
   railItem: 'inbox',
   sidebarOpen: false,
   activeAccountId: 'all',
+  accounts: mockAccounts,
+  connected: false,
   messages: mockMessages,
   contacts: seedContacts,
   hideDone: true,
@@ -141,9 +215,39 @@ export const useAppStore = create<AppState>()((set, get) => ({
   signature: 'Devah',
   refreshCount: 0,
 
+  init: async () => {
+    if (!hasMailApi()) return
+    const wireAccounts = await window.api.listAccounts()
+    if (wireAccounts.length === 0) {
+      set({
+        connected: false,
+        accounts: mockAccounts,
+        messages: mockMessages,
+        contacts: seedContacts,
+        activeAccountId: 'all'
+      })
+      return
+    }
+    const accs = wireAccounts.map(wireToAccount)
+    set((s) => ({
+      connected: true,
+      accounts: accs,
+      // Drop whatever was on screen (mock data on first connect); reload refills
+      messages: [],
+      contacts: [],
+      activeAccountId:
+        s.activeAccountId !== 'all' && !accs.some((a) => a.id === s.activeAccountId)
+          ? 'all'
+          : s.activeAccountId
+    }))
+    await reloadMail()
+    subscribeOnce()
+  },
+
   openGroup: (category) => set({ view: { name: 'group', category } }),
   openFolder: (folder) => set({ view: { name: 'folder', folder } }),
-  openThread: (threadId) =>
+  openThread: (threadId) => {
+    const unseen = threadMessages(get().messages, threadId).filter((m) => !m.flags.seen)
     set((s) => ({
       view: { name: 'thread', threadId },
       prevView: s.view.name === 'thread' || s.view.name === 'settings' ? s.prevView : s.view,
@@ -152,7 +256,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
           ? { ...m, flags: { ...m.flags, seen: true } }
           : m
       )
-    })),
+    }))
+    remoteAction(unseen, 'seen', true)
+  },
   openSettings: () =>
     set((s) => ({
       view: { name: 'settings' },
@@ -175,59 +281,79 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
   setAccount: (activeAccountId) => set({ activeAccountId }),
 
-  toggleArchiveThread: (threadId) =>
-    set((s) => {
-      const inThread = threadMessages(s.messages, threadId)
-      const anyInbox = inThread.some((m) => m.folder === 'inbox')
-      return {
-        messages: s.messages.map((m) => {
-          if (threadRootId(m) !== threadId) return m
-          if (anyInbox && m.folder === 'inbox') return { ...m, folder: 'archive' as Folder }
-          if (!anyInbox && m.folder === 'archive') return { ...m, folder: 'inbox' as Folder }
-          return m
-        })
-      }
-    }),
-  archiveThreads: (threadIds) =>
-    set((s) => {
-      const ids = new Set(threadIds)
-      return {
-        messages: s.messages.map((m) =>
-          ids.has(threadRootId(m)) && m.folder === 'inbox' ? { ...m, folder: 'archive' } : m
-        )
-      }
-    }),
-  toggleFlagged: (threadId) =>
-    set((s) => {
-      const anyFlagged = threadMessages(s.messages, threadId).some((m) => m.flags.flagged)
-      return {
-        messages: s.messages.map((m) =>
-          threadRootId(m) === threadId ? { ...m, flags: { ...m.flags, flagged: !anyFlagged } } : m
-        )
-      }
-    }),
-  toggleSeen: (threadId) =>
-    set((s) => {
-      const anyUnseen = threadMessages(s.messages, threadId).some((m) => !m.flags.seen)
-      return {
-        messages: s.messages.map((m) =>
-          threadRootId(m) === threadId ? { ...m, flags: { ...m.flags, seen: anyUnseen } } : m
-        )
-      }
-    }),
-  moveThread: (threadId, folder) =>
+  toggleArchiveThread: (threadId) => {
+    const inThread = threadMessages(get().messages, threadId)
+    const anyInbox = inThread.some((m) => m.folder === 'inbox')
+    set((s) => ({
+      messages: s.messages.map((m) => {
+        if (threadRootId(m) !== threadId) return m
+        if (anyInbox && m.folder === 'inbox') return { ...m, folder: 'archive' as Folder }
+        if (!anyInbox && m.folder === 'archive') return { ...m, folder: 'inbox' as Folder }
+        return m
+      })
+    }))
+    if (anyInbox) {
+      remoteAction(
+        inThread.filter((m) => m.folder === 'inbox'),
+        'archive'
+      )
+    } else {
+      remoteAction(
+        inThread.filter((m) => m.folder === 'archive'),
+        'unarchive'
+      )
+    }
+  },
+  archiveThreads: (threadIds) => {
+    const ids = new Set(threadIds)
+    const affected = get().messages.filter(
+      (m) => ids.has(threadRootId(m)) && m.folder === 'inbox'
+    )
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        ids.has(threadRootId(m)) && m.folder === 'inbox' ? { ...m, folder: 'archive' } : m
+      )
+    }))
+    remoteAction(affected, 'archive')
+  },
+  toggleFlagged: (threadId) => {
+    const inThread = threadMessages(get().messages, threadId)
+    const anyFlagged = inThread.some((m) => m.flags.flagged)
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        threadRootId(m) === threadId ? { ...m, flags: { ...m.flags, flagged: !anyFlagged } } : m
+      )
+    }))
+    remoteAction(inThread, 'flagged', !anyFlagged)
+  },
+  toggleSeen: (threadId) => {
+    const inThread = threadMessages(get().messages, threadId)
+    const anyUnseen = inThread.some((m) => !m.flags.seen)
+    set((s) => ({
+      messages: s.messages.map((m) =>
+        threadRootId(m) === threadId ? { ...m, flags: { ...m.flags, seen: anyUnseen } } : m
+      )
+    }))
+    remoteAction(inThread, 'seen', anyUnseen)
+  },
+  moveThread: (threadId, folder) => {
+    const affected = threadMessages(get().messages, threadId).filter(
+      (m) => m.folder !== 'sent' && m.folder !== 'drafts'
+    )
     set((s) => ({
       messages: s.messages.map((m) =>
         threadRootId(m) === threadId && m.folder !== 'sent' && m.folder !== 'drafts'
           ? { ...m, folder }
           : m
       )
-    })),
+    }))
+    remoteAction(affected, folder)
+  },
   deleteDraft: (messageId) =>
     set((s) => ({ messages: s.messages.filter((m) => m.messageId !== messageId) })),
   sendMessage: ({ to, subject, body, html, accountId, draftId }) =>
     set((s) => {
-      const account = accounts.find((a) => a.id === accountId) ?? accounts[0]
+      const account = s.accounts.find((a) => a.id === accountId) ?? s.accounts[0]
       const recipients = parseAddressList(to)
       // Sending a draft keeps its threading chain (In-Reply-To/References) and
       // category, exactly as saveDraft preserved them.
@@ -266,7 +392,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     }),
   saveDraft: ({ to, subject, body, html, accountId, draftId }) =>
     set((s) => {
-      const account = accounts.find((a) => a.id === accountId) ?? accounts[0]
+      const account = s.accounts.find((a) => a.id === accountId) ?? s.accounts[0]
       const existing = draftId ? s.messages.find((m) => m.messageId === draftId) : undefined
       const draft: Message = {
         messageId: draftId ?? makeMessageId(),
@@ -303,7 +429,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const recipients = isOwnAddress(target.from.address)
       ? target.to
       : [target.replyTo ?? target.from]
-    const account = accounts.find((a) => a.id === target.accountId) ?? accounts[0]
+    const account = s.accounts.find((a) => a.id === target.accountId) ?? s.accounts[0]
     const reply: Message = {
       messageId: makeMessageId(),
       inReplyTo: latest.messageId,
@@ -354,11 +480,17 @@ export const useAppStore = create<AppState>()((set, get) => ({
   scheduleReply: (threadId, body, html, delayMs) => {
     window.setTimeout(() => get().sendReply(threadId, body, html), delayMs)
   },
-  refreshInbox: () =>
+  refreshInbox: () => {
+    if (get().connected) {
+      void window.api.refresh().catch((err) => console.error('refresh failed:', err))
+      set((s) => ({ refreshCount: s.refreshCount + 1 }))
+      return
+    }
     set((s) => ({
       messages: [makeIncomingMessage(s.messages.length), ...s.messages],
       refreshCount: s.refreshCount + 1
-    })),
+    }))
+  },
 
   toggleHideDone: () => set((s) => ({ hideDone: !s.hideDone })),
   setSearchOpen: (searchOpen) => set({ searchOpen }),

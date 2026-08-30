@@ -6,7 +6,6 @@ import {
   DropdownMenuTrigger
 } from '../ui/dropdown-menu'
 import { useAppStore } from '../../store'
-import { accounts } from '../../data/mock'
 import HeaderControls from './HeaderControls'
 
 interface InboxHeaderProps {
@@ -16,6 +15,7 @@ interface InboxHeaderProps {
 export default function InboxHeader({ title = 'Inbox' }: InboxHeaderProps): React.JSX.Element {
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const setAccount = useAppStore((s) => s.setAccount)
+  const accounts = useAppStore((s) => s.accounts)
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId)
   const subtitle = activeAccountId === 'all' ? 'Focused List' : (activeAccount?.name ?? 'Focused List')
