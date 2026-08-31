@@ -16,7 +16,7 @@ export type View =
   | { name: 'settings' }
 
 export function makeMessageId(): string {
-  return `<${crypto.randomUUID()}@sparkclone.local>`
+  return `<${crypto.randomUUID()}@flint.local>`
 }
 
 /** Is this one of the user's own addresses? (used for sent rendering and reply targeting) */

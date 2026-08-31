@@ -1,6 +1,6 @@
-# spark-scaffold
+# Flint
 
-An Electron application with React and TypeScript
+A desktop email client built with Electron, React and TypeScript
 
 ## Recommended IDE Setup
 

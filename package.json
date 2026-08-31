@@ -1,7 +1,7 @@
 {
-  "name": "spark-clone",
+  "name": "flint",
   "version": "1.0.0",
-  "description": "Spark email client clone",
+  "description": "Flint email client",
   "main": "./out/main/index.js",
   "author": "example.com",
   "homepage": "https://electron-vite.org",

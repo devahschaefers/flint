@@ -167,7 +167,7 @@ export default function SettingsView(): React.JSX.Element {
 
           <Section label="About">
             <div className="flex h-12 items-center px-4 text-[12px] text-text-secondary">
-              Spark clone · v0.1.0 · mock data
+              Flint · v0.1.0 · mock data
             </div>
           </Section>
         </div>
