@@ -4,7 +4,7 @@ import type { Mailbox } from '../data/types'
  * Minimal RFC 5322 address-list parsing/formatting. Handles the forms real
  * clients emit: `Name <addr>`, `"Last, First" <addr>`, bare `addr`, and
  * comma-separated lists. Not a full grammar (no groups, comments, or
- * encoded-words) — mock data never produces those.
+ * encoded-words).
  */
 
 export function isValidAddress(address: string): boolean {

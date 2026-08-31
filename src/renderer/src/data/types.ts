@@ -48,6 +48,12 @@ export interface Message {
   /** text/html alternative part, when the message was composed rich */
   bodyHtml?: string
 
+  // provider identity (present on synced mail, absent on locally-composed messages)
+  /** Gmail message id — the handle remote actions are addressed with */
+  gmailId?: string
+  /** Provider conversation id; when present it overrides References-based threading */
+  threadId?: string
+
   // client-side state (not wire headers)
   accountId: string
   folder: Folder

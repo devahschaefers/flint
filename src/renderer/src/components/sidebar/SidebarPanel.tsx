@@ -15,7 +15,6 @@ import {
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store'
-import { accounts } from '../../data/mock'
 import type { Account } from '../../data/types'
 import type { RailItem } from './IconRail'
 
@@ -131,6 +130,7 @@ function FolderGroup({
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const setAccount = useAppStore((s) => s.setAccount)
   const view = useAppStore((s) => s.view)
+  const accounts = useAppStore((s) => s.accounts)
   const [expanded, setExpanded] = useState(defaultExpanded)
   return (
     <div>
@@ -169,6 +169,7 @@ export default function SidebarPanel(): React.JSX.Element {
   const railItem = useAppStore((s) => s.railItem)
   const setRailItem = useAppStore((s) => s.setRailItem)
   const messages = useAppStore((s) => s.messages)
+  const accounts = useAppStore((s) => s.accounts)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const setAccount = useAppStore((s) => s.setAccount)
   const goInbox = useAppStore((s) => s.goInbox)

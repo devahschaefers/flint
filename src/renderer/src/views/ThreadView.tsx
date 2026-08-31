@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import DOMPurify from 'dompurify'
 import { motion } from 'motion/react'
 import { ArrowLeft, Check, Pin } from 'lucide-react'
 import { shortDate } from '../lib/dates'
@@ -55,8 +56,17 @@ function MessageBlock({ message, contacts, isDraft }: MessageBlockProps): React.
       </div>
 
       {message.bodyHtml ? (
-        // Our own rich-composed markup (the message's text/html part)
-        <div className="rt mt-4" dangerouslySetInnerHTML={{ __html: message.bodyHtml }} />
+        // The message's text/html part. Real synced mail flows through here, so
+        // it is always sanitized (scripts, event handlers, and forms stripped).
+        <div
+          className="rt mt-4 overflow-x-auto"
+          dangerouslySetInnerHTML={{
+            __html: DOMPurify.sanitize(message.bodyHtml, {
+              USE_PROFILES: { html: true },
+              FORBID_TAGS: ['style', 'form', 'input', 'button']
+            })
+          }}
+        />
       ) : (
         <div className="mt-4">
           {message.body.map((paragraph, i) => (

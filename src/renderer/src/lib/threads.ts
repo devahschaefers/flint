@@ -24,7 +24,7 @@ export interface Thread {
 }
 
 export function threadRootId(message: Message): string {
-  return message.references[0] ?? message.messageId
+  return message.threadId ?? message.references[0] ?? message.messageId
 }
 
 export function normalizeSubject(subject: string): string {

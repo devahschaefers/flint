@@ -25,3 +25,21 @@ Interpretation to confirm: full HTML *email rendering* — incoming mail with re
 (newsletters, GitHub notifications with styled markup, tables, buttons, images) rendered
 sanitized and dark-mode-friendly in the thread view, with mock data upgraded to include
 genuine HTML messages. (Compose already produces a text/html part via the rich editor.)
+
+## 4. Real-mail follow-ups (post Gmail sync)
+Gmail read sync + action writeback landed (SQLite in main, PKCE OAuth, backfill + history
+delta). Still open, roughly in order:
+- Real sending: gmail.send scope + messages.send / drafts API. Compose/reply currently only
+  writes to the local in-memory store when connected (nothing actually leaves the machine);
+  local "sent" mail also vanishes on relaunch. Fold the schedule-send rework (#1) into this.
+- Draft round-trip: local draft edits/deletes don't push to Gmail (synced drafts reappear).
+- Search over the full DB: FTS5 table + IPC search endpoint (renderer search only sees the
+  hydrated window — newest 1500/account — today).
+- Replace the hydration window with true paged thread queries (infinite scroll from SQLite).
+- HTML rendering hardening: remote images are still loaded (tracking pixels!) — block by
+  default with a per-sender allow. Also #3's dark-mode treatment. Sanitization (DOMPurify)
+  is already in.
+- Attachments: parts are skipped entirely; store metadata + on-demand download to disk.
+- \Answered flag: Gmail doesn't expose it via labels; derive from own replies in-thread.
+- iCloud account support: IMAP adapter (imapflow/mailparser/nodemailer) + app-specific
+  password auth behind the same account interface.

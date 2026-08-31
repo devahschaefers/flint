@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { useEditorState } from '@tiptap/react'
 import { ChevronDown, X } from 'lucide-react'
-import { accounts } from '../../data/mock'
 import { formatAddressList, parseAddressList } from '../../lib/address'
 import { resolveMailbox } from '../../lib/identity'
 import { useAppStore } from '../../store'
@@ -23,13 +22,14 @@ export default function ComposerModal(): React.JSX.Element | null {
   const deleteDraft = useAppStore((s) => s.deleteDraft)
   const closeCompose = useAppStore((s) => s.closeCompose)
   const contacts = useAppStore((s) => s.contacts)
+  const accounts = useAppStore((s) => s.accounts)
   const draft = useAppStore((s) =>
     s.composer.draftId ? s.messages.find((m) => m.messageId === s.composer.draftId) : undefined
   )
 
   const [to, setTo] = useState('')
   const [subject, setSubject] = useState('')
-  const [accountId, setAccountId] = useState(accounts[0].id)
+  const [accountId, setAccountId] = useState(accounts[0]?.id ?? '')
 
   const editor = useComposeEditor({
     placeholder: 'Write something...',
@@ -40,7 +40,7 @@ export default function ComposerModal(): React.JSX.Element | null {
   // Prefill from the draft being edited, or reset for a fresh message, each time it opens
   useEffect(() => {
     if (!composer.open || !editor) return
-    const { messages, activeAccountId } = useAppStore.getState()
+    const { messages, activeAccountId, accounts } = useAppStore.getState()
     const editing = composer.draftId
       ? messages.find((m) => m.messageId === composer.draftId)
       : undefined
@@ -53,7 +53,7 @@ export default function ComposerModal(): React.JSX.Element | null {
       setTo('')
       setSubject('')
       editor.commands.clearContent()
-      setAccountId(activeAccountId !== 'all' ? activeAccountId : accounts[0].id)
+      setAccountId(activeAccountId !== 'all' ? activeAccountId : (accounts[0]?.id ?? ''))
     }
   }, [composer.open, composer.draftId, editor])
 
@@ -106,6 +106,8 @@ export default function ComposerModal(): React.JSX.Element | null {
   if (!composer.open) return null
 
   const fromAccount = accounts.find((a) => a.id === accountId) ?? accounts[0]
+  // No connected account: nothing to compose from
+  if (!fromAccount) return null
 
   const handleKeyDown = (e: React.KeyboardEvent): void => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

@@ -1,10 +1,16 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { initDb } from './db'
+import { registerIpc } from './ipc'
+import { syncEngine } from './sync'
 
 if (is.dev) {
-  app.commandLine.appendSwitch('remote-debugging-port', '9223')
+  app.commandLine.appendSwitch(
+    'remote-debugging-port',
+    process.env['DEBUG_PORT'] ?? '9223'
+  )
 }
 
 function createWindow(): void {
@@ -37,6 +43,15 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // Real email HTML contains links; clicks must open the system browser, never
+  // navigate the app window
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    const devUrl = process.env['ELECTRON_RENDERER_URL']
+    if (is.dev && devUrl && url.startsWith(devUrl)) return
+    event.preventDefault()
+    void shell.openExternal(url)
+  })
+
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -60,8 +75,9 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  // IPC test
-  ipcMain.on('ping', () => console.log('pong'))
+  initDb()
+  registerIpc()
+  syncEngine.startScheduler()
 
   createWindow()
 

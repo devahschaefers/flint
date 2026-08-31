@@ -16,6 +16,8 @@ export default function SmartInboxView(): React.JSX.Element {
   const hideDone = useAppStore((s) => s.hideDone)
   const openThread = useAppStore((s) => s.openThread)
   const openGroup = useAppStore((s) => s.openGroup)
+  const connected = useAppStore((s) => s.connected)
+  const openSettings = useAppStore((s) => s.openSettings)
 
   const threads = useMemo(
     () => buildThreads(filterByAccount(messages, activeAccountId)),
@@ -30,6 +32,26 @@ export default function SmartInboxView(): React.JSX.Element {
 
   const important = visible.filter((t) => t.important)
   const buckets = groupByBucket(important, (t) => t.latest.date)
+
+  if (!connected) {
+    return (
+      <div className="relative h-full flex flex-col">
+        <InboxHeader />
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 pb-24">
+          <span className="text-[15px] font-semibold text-text-primary">No account connected</span>
+          <span className="max-w-[340px] text-center text-[13px] leading-[1.5] text-text-secondary">
+            Connect your Gmail to start syncing your mail into the app.
+          </span>
+          <button
+            onClick={openSettings}
+            className="mt-2 rounded-[10px] bg-blue-4 px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+          >
+            Add account
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="relative h-full flex flex-col">
