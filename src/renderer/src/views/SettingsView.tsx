@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
 import { ArrowLeft, Check, Loader2, Plus, X } from 'lucide-react'
-import type { GoogleConfig, SyncStatus } from '../../../preload/index.d'
+import type { SyncStatus } from '../../../preload/index.d'
 import { resolveMailbox } from '../lib/identity'
 import { useAppStore } from '../store'
 import { cn } from '../lib/utils'
@@ -30,9 +30,6 @@ function Section({ label, children }: SectionProps): React.JSX.Element {
   )
 }
 
-const inputClass =
-  'select-text w-full rounded-[8px] border border-white/10 bg-elevation-0 p-2.5 text-[13px] text-text-primary outline-none placeholder:text-text-muted'
-
 /** IPC error messages arrive wrapped ("Error invoking remote method '…': Error: …") */
 function cleanError(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err)
@@ -49,21 +46,9 @@ function AccountsSection(): React.JSX.Element {
   const init = useAppStore((s) => s.init)
   const api = mailApi()
 
-  const [config, setConfig] = useState<GoogleConfig>({ clientId: '', clientSecret: '' })
-  const [showConfig, setShowConfig] = useState(false)
-  const [configSaved, setConfigSaved] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<SyncStatus[]>([])
-
-  useEffect(() => {
-    if (!api) return
-    void api.getGoogleConfig().then((cfg) => {
-      setConfig(cfg)
-      setShowConfig(!cfg.clientId)
-    })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // Poll backfill progress while settings is open
   useEffect(() => {
@@ -82,13 +67,6 @@ function AccountsSection(): React.JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connected])
-
-  const saveConfig = async (): Promise<void> => {
-    if (!api) return
-    await api.setGoogleConfig(config)
-    setConfigSaved(true)
-    window.setTimeout(() => setConfigSaved(false), 1500)
-  }
 
   const addAccount = async (): Promise<void> => {
     if (!api || busy) return
@@ -152,20 +130,14 @@ function AccountsSection(): React.JSX.Element {
         {api && (
           <button
             onClick={() => void addAccount()}
-            disabled={busy || !config.clientId}
+            disabled={busy}
             className={cn(
               'flex h-12 w-full items-center gap-3 px-4 text-[13px] transition-colors',
-              busy || !config.clientId
-                ? 'cursor-default text-text-muted'
-                : 'text-text-bright hover:text-ink'
+              busy ? 'cursor-default text-text-muted' : 'text-text-bright hover:text-ink'
             )}
           >
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
-            {busy
-              ? 'Waiting for Google sign-in in your browser…'
-              : config.clientId
-                ? 'Add Gmail account'
-                : 'Add Gmail account (configure the Google API client below first)'}
+            {busy ? 'Waiting for Google sign-in in your browser…' : 'Add Gmail account'}
           </button>
         )}
         {error && <div className="px-4 py-3 text-[12px] text-red-3">{error}</div>}
@@ -175,54 +147,6 @@ function AccountsSection(): React.JSX.Element {
           </div>
         )}
       </Section>
-
-      {api && (
-        <Section label="Google API client">
-          <div className="flex flex-col gap-2.5 px-4 py-3">
-            {showConfig ? (
-              <>
-                <span className="text-[12px] leading-[1.5] text-text-secondary">
-                  One-time setup: create an OAuth client (type “Desktop app”) in Google Cloud
-                  Console under APIs &amp; Services → Credentials, enable the Gmail API, and paste
-                  the client ID and secret here.
-                </span>
-                <input
-                  value={config.clientId}
-                  onChange={(e) => setConfig((c) => ({ ...c, clientId: e.target.value }))}
-                  placeholder="Client ID (…apps.googleusercontent.com)"
-                  className={inputClass}
-                />
-                <input
-                  value={config.clientSecret}
-                  onChange={(e) => setConfig((c) => ({ ...c, clientSecret: e.target.value }))}
-                  placeholder="Client secret"
-                  className={inputClass}
-                />
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => void saveConfig()}
-                    className="rounded-[8px] bg-elevation-2 px-3 py-1.5 text-[12px] text-text-bright transition-colors hover:text-ink"
-                  >
-                    {configSaved ? 'Saved' : 'Save'}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="flex items-center">
-                <span className="text-[12px] text-text-secondary">
-                  Configured · {config.clientId.slice(0, 24)}…
-                </span>
-                <button
-                  onClick={() => setShowConfig(true)}
-                  className="ml-auto text-[12px] text-text-bright transition-colors hover:text-ink"
-                >
-                  Edit
-                </button>
-              </div>
-            )}
-          </div>
-        </Section>
-      )}
     </>
   )
 }

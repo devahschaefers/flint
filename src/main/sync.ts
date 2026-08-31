@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import * as db from './db'
 import { GmailApi, GmailError, labelsToState } from './google/gmail'
 import { runAuthFlow, refreshAccessToken } from './google/oauth'
+import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } from './google/clientDefaults'
 import type { MailAction, SyncStatus, WireAccount } from '../preload/index.d'
 
 /**
@@ -44,13 +45,12 @@ class SyncEngine {
   private deltaRunning = new Set<string>()
   private notifyTimer: NodeJS.Timeout | null = null
 
+  /** Built-in OAuth client, overridable via config rows (for forks) */
   private clientConfig(): { clientId: string; clientSecret: string } {
-    const clientId = db.getConfig('google_client_id')
-    const clientSecret = db.getConfig('google_client_secret')
-    if (!clientId || !clientSecret) {
-      throw new Error('Google API client is not configured — add the client ID and secret in Settings')
+    return {
+      clientId: db.getConfig('google_client_id') || GOOGLE_CLIENT_ID,
+      clientSecret: db.getConfig('google_client_secret') || GOOGLE_CLIENT_SECRET
     }
-    return { clientId, clientSecret }
   }
 
   private api(accountId: string): GmailApi {
