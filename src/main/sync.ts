@@ -1,8 +1,9 @@
 import { BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
+import { OAuth2Client } from 'google-auth-library'
 import * as db from './db'
 import { GmailApi, GmailError, labelsToState } from './google/gmail'
-import { runAuthFlow, refreshAccessToken } from './google/oauth'
+import { runAuthFlow } from './google/oauth'
 import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } from './google/clientDefaults'
 import type { MailAction, SyncStatus, WireAccount } from '../preload/index.d'
 
@@ -39,7 +40,7 @@ async function mapConcurrent<T, R>(
 }
 
 class SyncEngine {
-  private tokens = new Map<string, { accessToken: string; expiresAt: number }>()
+  private authClients = new Map<string, OAuth2Client>()
   private apis = new Map<string, GmailApi>()
   private backfilling = new Set<string>()
   private deltaRunning = new Set<string>()
@@ -53,24 +54,33 @@ class SyncEngine {
     }
   }
 
+  /** OAuth2Client per account: refreshes access tokens from the stored refresh token */
+  private authClient(accountId: string): OAuth2Client {
+    let client = this.authClients.get(accountId)
+    if (!client) {
+      const { clientId, clientSecret } = this.clientConfig()
+      const refreshToken = db.getRefreshToken(accountId)
+      if (!refreshToken) {
+        throw new Error('Account has no stored credentials — re-add it in Settings')
+      }
+      client = new OAuth2Client({ clientId, clientSecret })
+      client.setCredentials({ refresh_token: refreshToken })
+      // Google can rotate the refresh token; persist whatever it hands back
+      client.on('tokens', (tokens) => {
+        if (tokens.refresh_token) db.saveRefreshToken(accountId, tokens.refresh_token)
+      })
+      this.authClients.set(accountId, client)
+    }
+    return client
+  }
+
   private api(accountId: string): GmailApi {
     let api = this.apis.get(accountId)
     if (!api) {
-      api = new GmailApi((force) => this.accessToken(accountId, force))
+      api = new GmailApi(this.authClient(accountId))
       this.apis.set(accountId, api)
     }
     return api
-  }
-
-  private async accessToken(accountId: string, force: boolean): Promise<string> {
-    const cached = this.tokens.get(accountId)
-    if (!force && cached && cached.expiresAt - Date.now() > 60_000) return cached.accessToken
-    const { clientId, clientSecret } = this.clientConfig()
-    const refreshToken = db.getRefreshToken(accountId)
-    if (!refreshToken) throw new Error('Account has no stored credentials — re-add it in Settings')
-    const fresh = await refreshAccessToken(clientId, clientSecret, refreshToken)
-    this.tokens.set(accountId, fresh)
-    return fresh.accessToken
   }
 
   /** Run the browser OAuth flow, create (or re-authorize) the account, start syncing */
@@ -91,10 +101,9 @@ class SyncEngine {
       })
     }
     db.saveRefreshToken(accountId, auth.tokens.refreshToken)
-    this.tokens.set(accountId, {
-      accessToken: auth.tokens.accessToken,
-      expiresAt: auth.tokens.expiresAt
-    })
+    // Drop any client built on a previous refresh token (the re-add case)
+    this.authClients.delete(accountId)
+    this.apis.delete(accountId)
     // Anchor delta sync before backfill begins so nothing slips between them
     if (!db.getHistoryId(accountId)) {
       const profile = await this.api(accountId).getProfile()
@@ -108,7 +117,7 @@ class SyncEngine {
 
   removeAccount(accountId: string): void {
     db.deleteAccount(accountId)
-    this.tokens.delete(accountId)
+    this.authClients.delete(accountId)
     this.apis.delete(accountId)
     this.notify()
   }
@@ -176,24 +185,20 @@ class SyncEngine {
         const page = await api.listHistory(start, pageToken)
         latest = page.historyId ?? latest
         for (const entry of page.history) {
-          for (const added of entry.messagesAdded ?? []) {
-            const parsed = await api.getMessage(added.message.id)
+          for (const added of entry.messagesAdded) {
+            const parsed = await api.getMessage(added.id)
             if (parsed) {
               db.upsertMessages([{ ...parsed, accountId }])
               changed = true
             }
           }
-          for (const deleted of entry.messagesDeleted ?? []) {
-            db.deleteMessage(accountId, deleted.message.id)
+          for (const deleted of entry.messagesDeleted) {
+            db.deleteMessage(accountId, deleted.id)
             changed = true
           }
-          for (const labeled of [...(entry.labelsAdded ?? []), ...(entry.labelsRemoved ?? [])]) {
-            if (db.hasMessage(accountId, labeled.message.id)) {
-              db.updateMessageState(
-                accountId,
-                labeled.message.id,
-                labelsToState(labeled.message.labelIds ?? [])
-              )
+          for (const change of entry.labelChanges) {
+            if (db.hasMessage(accountId, change.id)) {
+              db.updateMessageState(accountId, change.id, labelsToState(change.labelIds))
               changed = true
             }
           }

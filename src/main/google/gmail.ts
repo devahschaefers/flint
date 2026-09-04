@@ -1,12 +1,13 @@
 /**
- * Hand-rolled Gmail REST client (the API surface we need is small: list, get,
- * history, label modify). Token acquisition/refresh is injected so the sync
- * engine owns credential state.
+ * Thin adapter over Google's official Gmail client (@googleapis/gmail).
+ * Normalizes the SDK's nullable schema types into the concrete shapes the sync
+ * engine consumes, and maps transport errors to GmailError so callers keep
+ * status-code semantics (the history-expired 404 fallback relies on it).
  */
 
+import { gmail, gmail_v1 } from '@googleapis/gmail'
+import type { OAuth2Client } from 'google-auth-library'
 import type { Folder } from '../../preload/index.d'
-
-const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me'
 
 export class GmailError extends Error {
   constructor(
@@ -46,85 +47,72 @@ export interface ParsedMessage {
   important: boolean
 }
 
-interface GmailPart {
-  mimeType?: string
-  filename?: string
-  headers?: { name: string; value: string }[]
-  body?: { data?: string; size?: number }
-  parts?: GmailPart[]
-}
-
-interface GmailMessage {
-  id: string
-  threadId: string
-  labelIds?: string[]
-  snippet?: string
-  internalDate?: string
-  payload?: GmailPart
-}
-
+/** One history record, normalized (nulls dropped) */
 export interface HistoryEntry {
-  id: string
-  messagesAdded?: { message: { id: string; threadId: string } }[]
-  messagesDeleted?: { message: { id: string } }[]
-  labelsAdded?: { message: GmailMessage }[]
-  labelsRemoved?: { message: GmailMessage }[]
+  messagesAdded: { id: string }[]
+  messagesDeleted: { id: string }[]
+  labelChanges: { id: string; labelIds: string[] }[]
 }
-
-export type GetToken = (forceRefresh: boolean) => Promise<string>
 
 const RETRIABLE = new Set([429, 500, 502, 503])
 
-export class GmailApi {
-  constructor(private getToken: GetToken) {}
+function errorStatus(err: unknown): number {
+  const e = err as { response?: { status?: number }; status?: number }
+  return e.response?.status ?? e.status ?? 0
+}
 
-  private async req<T>(path: string, init?: RequestInit): Promise<T> {
-    let forceRefresh = false
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+export class GmailApi {
+  private g: gmail_v1.Gmail
+
+  constructor(auth: OAuth2Client) {
+    this.g = gmail({ version: 'v1', auth })
+  }
+
+  /** Run an SDK call with backoff on transient failures; rethrow as GmailError */
+  private async call<T>(label: string, fn: () => Promise<{ data: T }>): Promise<T> {
     for (let attempt = 0; ; attempt++) {
-      const token = await this.getToken(forceRefresh)
-      const res = await fetch(`${BASE}${path}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          ...init?.headers
+      try {
+        return (await fn()).data
+      } catch (err) {
+        const status = errorStatus(err)
+        if (RETRIABLE.has(status) && attempt < 3) {
+          await sleep(1000 * 2 ** attempt)
+          continue
         }
-      })
-      if (res.ok) {
-        const text = await res.text()
-        return (text ? JSON.parse(text) : {}) as T
+        throw new GmailError(status, `Gmail ${label} failed: ${(err as Error).message}`)
       }
-      if (res.status === 401 && attempt === 0) {
-        forceRefresh = true
-        continue
-      }
-      if (RETRIABLE.has(res.status) && attempt < 3) {
-        await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt))
-        continue
-      }
-      throw new GmailError(res.status, `Gmail ${path} failed: ${res.status} ${await res.text()}`)
     }
   }
 
   async getProfile(): Promise<{ emailAddress: string; historyId: string }> {
-    return this.req('/profile')
+    const p = await this.call('getProfile', () => this.g.users.getProfile({ userId: 'me' }))
+    return { emailAddress: p.emailAddress ?? '', historyId: p.historyId ?? '' }
   }
 
-  async listMessageIds(
-    pageToken?: string
-  ): Promise<{ ids: string[]; nextPageToken?: string }> {
-    const params = new URLSearchParams({ maxResults: '100', includeSpamTrash: 'true' })
-    if (pageToken) params.set('pageToken', pageToken)
-    const res = await this.req<{
-      messages?: { id: string }[]
-      nextPageToken?: string
-    }>(`/messages?${params}`)
-    return { ids: (res.messages ?? []).map((m) => m.id), nextPageToken: res.nextPageToken }
+  async listMessageIds(pageToken?: string): Promise<{ ids: string[]; nextPageToken?: string }> {
+    const res = await this.call('messages.list', () =>
+      this.g.users.messages.list({
+        userId: 'me',
+        maxResults: 100,
+        includeSpamTrash: true,
+        pageToken
+      })
+    )
+    return {
+      ids: (res.messages ?? []).flatMap((m) => (m.id ? [m.id] : [])),
+      nextPageToken: res.nextPageToken ?? undefined
+    }
   }
 
   async getMessage(id: string): Promise<ParsedMessage | null> {
     try {
-      const res = await this.req<GmailMessage>(`/messages/${id}?format=full`)
+      const res = await this.call('messages.get', () =>
+        this.g.users.messages.get({ userId: 'me', id, format: 'full' })
+      )
       return parseGmailMessage(res)
     } catch (err) {
       // Messages can vanish between list and get (e.g. spam purge)
@@ -137,34 +125,49 @@ export class GmailApi {
     startHistoryId: string,
     pageToken?: string
   ): Promise<{ history: HistoryEntry[]; historyId?: string; nextPageToken?: string }> {
-    const params = new URLSearchParams({ startHistoryId, maxResults: '100' })
-    if (pageToken) params.set('pageToken', pageToken)
-    const res = await this.req<{
-      history?: HistoryEntry[]
-      historyId?: string
-      nextPageToken?: string
-    }>(`/history?${params}`)
-    return { history: res.history ?? [], historyId: res.historyId, nextPageToken: res.nextPageToken }
+    const res = await this.call('history.list', () =>
+      this.g.users.history.list({ userId: 'me', startHistoryId, maxResults: 100, pageToken })
+    )
+    const history = (res.history ?? []).map(
+      (h): HistoryEntry => ({
+        messagesAdded: (h.messagesAdded ?? []).flatMap((m) =>
+          m.message?.id ? [{ id: m.message.id }] : []
+        ),
+        messagesDeleted: (h.messagesDeleted ?? []).flatMap((m) =>
+          m.message?.id ? [{ id: m.message.id }] : []
+        ),
+        labelChanges: [...(h.labelsAdded ?? []), ...(h.labelsRemoved ?? [])].flatMap((l) =>
+          l.message?.id ? [{ id: l.message.id, labelIds: l.message.labelIds ?? [] }] : []
+        )
+      })
+    )
+    return {
+      history,
+      historyId: res.historyId ?? undefined,
+      nextPageToken: res.nextPageToken ?? undefined
+    }
   }
 
   async batchModify(ids: string[], addLabelIds: string[], removeLabelIds: string[]): Promise<void> {
     if (ids.length === 0) return
-    await this.req('/messages/batchModify', {
-      method: 'POST',
-      body: JSON.stringify({ ids, addLabelIds, removeLabelIds })
-    })
+    await this.call('messages.batchModify', () =>
+      this.g.users.messages.batchModify({
+        userId: 'me',
+        requestBody: { ids, addLabelIds, removeLabelIds }
+      })
+    )
   }
 
   async trash(id: string): Promise<void> {
-    await this.req(`/messages/${id}/trash`, { method: 'POST' })
+    await this.call('messages.trash', () => this.g.users.messages.trash({ userId: 'me', id }))
   }
 
   async untrash(id: string): Promise<void> {
-    await this.req(`/messages/${id}/untrash`, { method: 'POST' })
+    await this.call('messages.untrash', () => this.g.users.messages.untrash({ userId: 'me', id }))
   }
 }
 
-// ---------- parsing ----------
+// ---------- parsing (unchanged pipeline; mailparser adoption is a later phase) ----------
 
 /** Minimal RFC 5322 address-list parser (same forms the renderer's lib handles) */
 export function parseAddressList(input: string | undefined): Mailbox[] {
@@ -205,7 +208,7 @@ function decodeBody(data: string): string {
 }
 
 /** Depth-first walk for the first text/plain and text/html parts + calendar detection */
-function extractBodies(part: GmailPart | undefined): {
+function extractBodies(part: gmail_v1.Schema$MessagePart | undefined): {
   text: string
   html: string | null
   hasCalendar: boolean
@@ -213,7 +216,7 @@ function extractBodies(part: GmailPart | undefined): {
   let text = ''
   let html: string | null = null
   let hasCalendar = false
-  const walk = (p: GmailPart | undefined): void => {
+  const walk = (p: gmail_v1.Schema$MessagePart | undefined): void => {
     if (!p) return
     const mime = p.mimeType ?? ''
     if (mime === 'text/calendar' || (p.filename ?? '').toLowerCase().endsWith('.ics')) {
@@ -273,14 +276,14 @@ function categoryOf(labels: string[], hasCalendar: boolean): string {
   return 'people'
 }
 
-export function parseGmailMessage(res: GmailMessage): ParsedMessage {
+export function parseGmailMessage(res: gmail_v1.Schema$Message): ParsedMessage {
   const headers = new Map<string, string>()
   for (const h of res.payload?.headers ?? []) {
-    const key = h.name.toLowerCase()
-    if (!headers.has(key)) headers.set(key, h.value)
+    const key = h.name?.toLowerCase()
+    if (key && h.value != null && !headers.has(key)) headers.set(key, h.value)
   }
   const labels = res.labelIds ?? []
-  const { text, html, hasCalendar } = extractBodies(res.payload)
+  const { text, html, hasCalendar } = extractBodies(res.payload ?? undefined)
   const from = parseAddressList(headers.get('from'))[0] ?? { address: '' }
   const replyTo = parseAddressList(headers.get('reply-to'))[0] ?? null
   const references = (headers.get('references') ?? '')
@@ -289,8 +292,8 @@ export function parseGmailMessage(res: GmailMessage): ParsedMessage {
   const state = labelsToState(labels)
 
   return {
-    gmailId: res.id,
-    threadId: res.threadId,
+    gmailId: res.id ?? '',
+    threadId: res.threadId ?? '',
     messageIdHdr: headers.get('message-id') ?? null,
     inReplyTo: headers.get('in-reply-to') ?? null,
     references,

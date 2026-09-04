@@ -43,3 +43,5 @@ delta). Still open, roughly in order:
 - \Answered flag: Gmail doesn't expose it via labels; derive from own replies in-thread.
 - iCloud account support: IMAP adapter (imapflow/mailparser/nodemailer) + app-specific
   password auth behind the same account interface.
+- Phase 2 of the SDK migration: mailparser over format=raw (charsets, encoded-words,
+  attachments) and nodemailer MailComposer when sending gets built.

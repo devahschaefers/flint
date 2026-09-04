@@ -1,17 +1,18 @@
 import { createServer } from 'http'
-import { createHash, randomBytes } from 'crypto'
+import { randomBytes } from 'crypto'
 import { shell } from 'electron'
+import { CodeChallengeMethod, OAuth2Client } from 'google-auth-library'
 
 /**
  * OAuth 2.0 for native apps (RFC 8252): PKCE + loopback redirect. The system
  * browser handles the Google sign-in; we listen on an ephemeral 127.0.0.1 port
- * for the redirect carrying the authorization code.
+ * for the redirect carrying the authorization code. Token exchange and refresh
+ * are google-auth-library's OAuth2Client; the desktop dance stays ours because
+ * no official package provides it.
  */
 
-const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
-const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo'
-const SCOPES = 'https://www.googleapis.com/auth/gmail.modify openid email profile'
+const SCOPES = ['https://www.googleapis.com/auth/gmail.modify', 'openid', 'email', 'profile']
 const FLOW_TIMEOUT_MS = 5 * 60 * 1000
 
 export interface TokenSet {
@@ -28,36 +29,17 @@ export interface AuthResult {
   name: string
 }
 
-function base64url(buf: Buffer): string {
-  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
 const LANDING_HTML = `<!doctype html><meta charset="utf-8"><title>Signed in</title>
 <body style="font-family:system-ui;background:#1F2124;color:#eee;display:grid;place-items:center;height:100vh;margin:0">
 <div style="text-align:center"><h2>Account connected</h2><p>You can close this tab and return to the app.</p></div>`
 
-async function tokenRequest(params: Record<string, string>): Promise<Record<string, unknown>> {
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(params).toString()
-  })
-  const json = (await res.json()) as Record<string, unknown>
-  if (!res.ok) {
-    throw new Error(`Token exchange failed: ${json['error'] ?? res.status} ${json['error_description'] ?? ''}`)
-  }
-  return json
-}
-
 export async function runAuthFlow(clientId: string, clientSecret: string): Promise<AuthResult> {
-  const verifier = base64url(randomBytes(32))
-  const challenge = base64url(createHash('sha256').update(verifier).digest())
-  const state = base64url(randomBytes(16))
+  const state = randomBytes(16).toString('base64url')
 
   // Start the loopback server first so we know the redirect port
-  let resolveStart!: (v: { code: string; port: number }) => void
+  let resolveStart!: (v: { code: string }) => void
   let rejectStart!: (e: Error) => void
-  const codePromise = new Promise<{ code: string; port: number }>((res, rej) => {
+  const codePromise = new Promise<{ code: string }>((res, rej) => {
     resolveStart = res
     rejectStart = rej
   })
@@ -75,44 +57,35 @@ export async function runAuthFlow(clientId: string, clientSecret: string): Promi
     server.close()
     if (error) rejectStart(new Error(`Google returned: ${error}`))
     else if (!code || cbState !== state) rejectStart(new Error('Invalid OAuth callback'))
-    else resolveStart({ code, port })
+    else resolveStart({ code })
   })
   const timer = setTimeout(() => {
     server.close()
     rejectStart(new Error('Sign-in timed out (5 minutes) — try again'))
   }, FLOW_TIMEOUT_MS)
-  let port = 0
   await new Promise<void>((res) => server.listen(0, '127.0.0.1', () => res()))
-  port = (server.address() as { port: number }).port
-
+  const port = (server.address() as { port: number }).port
   const redirectUri = `http://127.0.0.1:${port}/oauth2callback`
-  const authUrl = new URL(AUTH_URL)
-  authUrl.search = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope: SCOPES,
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-    state,
+
+  const client = new OAuth2Client({ clientId, clientSecret, redirectUri })
+  const { codeVerifier, codeChallenge } = await client.generateCodeVerifierAsync()
+  const authUrl = client.generateAuthUrl({
     access_type: 'offline',
+    scope: SCOPES,
+    state,
+    code_challenge_method: CodeChallengeMethod.S256,
+    code_challenge: codeChallenge,
     // Force the consent screen so Google always issues a refresh token,
     // including on account re-adds
     prompt: 'consent'
-  }).toString()
-  void shell.openExternal(authUrl.toString())
+  })
+  void shell.openExternal(authUrl)
 
   const { code } = await codePromise
-  const tokens = await tokenRequest({
-    code,
-    client_id: clientId,
-    client_secret: clientSecret,
-    redirect_uri: redirectUri,
-    grant_type: 'authorization_code',
-    code_verifier: verifier
-  })
-  const accessToken = tokens['access_token'] as string
-  const refreshToken = tokens['refresh_token'] as string | undefined
+  const { tokens } = await client.getToken({ code, codeVerifier, redirect_uri: redirectUri })
+  const accessToken = tokens.access_token
+  const refreshToken = tokens.refresh_token
+  if (!accessToken) throw new Error('Google did not return an access token — try again')
   if (!refreshToken) throw new Error('Google did not return a refresh token — try again')
 
   const infoRes = await fetch(USERINFO_URL, {
@@ -126,26 +99,9 @@ export async function runAuthFlow(clientId: string, clientSecret: string): Promi
     tokens: {
       accessToken,
       refreshToken,
-      expiresAt: Date.now() + ((tokens['expires_in'] as number) ?? 3600) * 1000
+      expiresAt: tokens.expiry_date ?? Date.now() + 3600 * 1000
     },
     email: info.email.toLowerCase(),
     name: info.name ?? info.email
-  }
-}
-
-export async function refreshAccessToken(
-  clientId: string,
-  clientSecret: string,
-  refreshToken: string
-): Promise<{ accessToken: string; expiresAt: number }> {
-  const tokens = await tokenRequest({
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: refreshToken,
-    grant_type: 'refresh_token'
-  })
-  return {
-    accessToken: tokens['access_token'] as string,
-    expiresAt: Date.now() + ((tokens['expires_in'] as number) ?? 3600) * 1000
   }
 }
