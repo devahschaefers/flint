@@ -14,7 +14,7 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
-    "postinstall": "node scripts/ensure-electron.js && electron-rebuild -f -w better-sqlite3",
+    "postinstall": "node scripts/ensure-electron.js",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
@@ -44,7 +44,6 @@
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
-    "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
@@ -70,5 +69,6 @@
     "esbuild@0.28.2": true,
     "fsevents@2.3.3": true,
     "electron-winstaller@5.4.0": true
-  }
+  },
+  "packageManager": "pnpm@11.25.0"
 }
