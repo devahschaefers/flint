@@ -354,6 +354,13 @@ export function queryWindow(perAccount: number): WireMessage[] {
   return out
 }
 
+export function getMessageWire(accountId: string, gmailId: string): WireMessage | null {
+  const row = db
+    .prepare('SELECT * FROM messages WHERE account_id = ? AND gmail_id = ?')
+    .get(accountId, gmailId) as MessageRow | undefined
+  return row ? rowToWire(row) : null
+}
+
 export function queryThread(accountId: string, threadId: string): WireMessage[] {
   return (
     db

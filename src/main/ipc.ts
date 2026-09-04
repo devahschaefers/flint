@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import * as db from './db'
 import { syncEngine } from './sync'
-import type { GoogleConfig, MailAction } from '../preload/index.d'
+import type { GoogleConfig, MailAction, SendMailInput } from '../preload/index.d'
 
 export function registerIpc(): void {
   ipcMain.handle('config:google:get', (): GoogleConfig => ({
@@ -26,6 +26,8 @@ export function registerIpc(): void {
     (_e, p: { accountId: string; gmailIds: string[]; action: MailAction; value?: boolean }) =>
       syncEngine.applyAction(p.accountId, p.gmailIds, p.action, p.value)
   )
+
+  ipcMain.handle('mail:send', (_e, input: SendMailInput) => syncEngine.sendMail(input))
 
   ipcMain.handle('sync:refresh', () => syncEngine.deltaAll())
   ipcMain.handle('sync:status', () => syncEngine.status())

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { GoogleConfig, MailAction, MailApi } from './index.d'
+import type { GoogleConfig, MailAction, MailApi, SendMailInput } from './index.d'
 
 const api: MailApi = {
   getGoogleConfig: () => ipcRenderer.invoke('config:google:get'),
@@ -13,6 +13,7 @@ const api: MailApi = {
     ipcRenderer.invoke('mail:thread', { accountId, threadId }),
   mailAction: (p: { accountId: string; gmailIds: string[]; action: MailAction; value?: boolean }) =>
     ipcRenderer.invoke('mail:action', p),
+  sendMail: (input: SendMailInput) => ipcRenderer.invoke('mail:send', input),
   refresh: () => ipcRenderer.invoke('sync:refresh'),
   syncStatus: () => ipcRenderer.invoke('sync:status'),
   onMailChanged: (cb: () => void) => {

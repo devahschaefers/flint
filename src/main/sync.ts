@@ -5,7 +5,8 @@ import * as db from './db'
 import { GmailApi, GmailError, labelsToState } from './google/gmail'
 import { runAuthFlow } from './google/oauth'
 import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } from './google/clientDefaults'
-import type { MailAction, SyncStatus, WireAccount } from '../preload/index.d'
+import { buildMime } from './mime'
+import type { MailAction, SendMailInput, SyncStatus, WireAccount, WireMessage } from '../preload/index.d'
 
 /**
  * Per-account Gmail sync. Initial backfill walks the whole mailbox newest-first
@@ -264,6 +265,32 @@ class SyncEngine {
         await api.batchModify(gmailIds, ['INBOX'], ['SPAM'])
         break
     }
+  }
+
+  /** Build the RFC 822 message, send it through Gmail, and store the synced copy */
+  async sendMail(input: SendMailInput): Promise<WireMessage> {
+    const account = db.listAccounts().find((a) => a.id === input.accountId)
+    if (!account) throw new Error('Unknown account')
+    const raw = await buildMime({
+      from: { name: account.name, address: account.email },
+      to: input.to,
+      cc: input.cc,
+      subject: input.subject,
+      text: input.text,
+      html: input.html,
+      inReplyTo: input.inReplyTo,
+      references: input.references
+    })
+    const api = this.api(input.accountId)
+    const gmailId = await api.send(raw, input.threadId)
+    // Pull the message back so the local copy carries Gmail's ids and labels
+    const parsed = await api.getMessage(gmailId)
+    if (!parsed) throw new Error('Message sent but could not be read back')
+    db.upsertMessages([{ ...parsed, accountId: input.accountId }])
+    this.notify()
+    const wire = db.getMessageWire(input.accountId, gmailId)
+    if (!wire) throw new Error('Message sent but missing from the local store')
+    return wire
   }
 
   status(): SyncStatus[] {

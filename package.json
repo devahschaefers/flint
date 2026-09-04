@@ -38,6 +38,7 @@
     "google-auth-library": "^10.5.0",
     "lucide-react": "^1.34.0",
     "motion": "^13.1.1",
+    "nodemailer": "^9.1.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4.3.3",
     "zustand": "^5.0.15"
@@ -48,6 +49,7 @@
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.19.1",
+    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",

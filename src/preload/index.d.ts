@@ -48,6 +48,22 @@ export interface WireMessage {
   important: boolean
 }
 
+export interface SendMailInput {
+  accountId: string
+  to: WireMailbox[]
+  cc: WireMailbox[]
+  subject: string
+  /** text/plain part */
+  text: string
+  /** text/html part, when composed rich */
+  html?: string
+  /** Parent Message-ID header, for reply threading */
+  inReplyTo?: string
+  references: string[]
+  /** Gmail conversation to append to (replies) */
+  threadId?: string
+}
+
 export interface SyncStatus {
   accountId: string
   email: string
@@ -75,6 +91,8 @@ export interface MailApi {
     action: MailAction
     value?: boolean
   }): Promise<void>
+  /** Send through Gmail; resolves with the stored synced copy of the sent message */
+  sendMail(input: SendMailInput): Promise<WireMessage>
   refresh(): Promise<void>
   syncStatus(): Promise<SyncStatus[]>
   /** Subscribe to "local store changed" pushes; returns unsubscribe */

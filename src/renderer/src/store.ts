@@ -3,7 +3,7 @@ import type { Account, Category, Contact, Folder, Mailbox, Message } from './dat
 import { parseAddressList } from './lib/address'
 import { threadRootId } from './lib/threads'
 import { deriveContacts, wireToAccount, wireToMessage } from './lib/wire'
-import type { MailAction } from '../../preload/index.d'
+import type { MailAction, SendMailInput } from '../../preload/index.d'
 import type { RailItem } from './components/sidebar/IconRail'
 
 /** Folder-style lists reachable from the rail/sidebar ('pins' = flagged, not a folder) */
@@ -83,6 +83,59 @@ function subscribeOnce(): void {
   if (subscribed || !hasMailApi()) return
   subscribed = true
   window.api.onMailChanged(() => void reloadMail())
+}
+
+/** Undo window before a reply actually leaves the machine */
+const UNDO_SEND_MS = 5000
+const pendingSends = new Map<string, number>()
+
+function toSendInput(local: Message): SendMailInput {
+  return {
+    accountId: local.accountId,
+    to: local.to,
+    cc: local.cc,
+    subject: local.subject,
+    text: local.body.join('\n\n'),
+    html: local.bodyHtml,
+    inReplyTo: local.inReplyTo,
+    references: local.references,
+    threadId: local.threadId
+  }
+}
+
+/** Really send: on success the optimistic local copy is swapped for Gmail's synced one */
+function dispatchSend(local: Message): void {
+  window.api
+    .sendMail(toSendInput(local))
+    .then((wire) => {
+      useAppStore.setState((s) => ({
+        messages: [
+          wireToMessage(wire),
+          ...s.messages.filter((m) => m.messageId !== local.messageId)
+        ]
+      }))
+    })
+    .catch((err) => {
+      console.error('[send] failed — message kept locally only:', err)
+    })
+}
+
+/** Delayed send backing the reply toast's Undo */
+function queueSend(local: Message): void {
+  if (!useAppStore.getState().connected) return
+  const timer = window.setTimeout(() => {
+    pendingSends.delete(local.messageId)
+    dispatchSend(local)
+  }, UNDO_SEND_MS)
+  pendingSends.set(local.messageId, timer)
+}
+
+function cancelPendingSend(messageId: string): void {
+  const timer = pendingSends.get(messageId)
+  if (timer !== undefined) {
+    window.clearTimeout(timer)
+    pendingSends.delete(messageId)
+  }
 }
 
 function toParagraphs(text: string): string[] {
@@ -345,46 +398,49 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
   deleteDraft: (messageId) =>
     set((s) => ({ messages: s.messages.filter((m) => m.messageId !== messageId) })),
-  sendMessage: ({ to, subject, body, html, accountId, draftId }) =>
-    set((s) => {
-      const account = s.accounts.find((a) => a.id === accountId) ?? s.accounts[0]
-      if (!account) return {}
-      const recipients = parseAddressList(to)
-      // Sending a draft keeps its threading chain (In-Reply-To/References) and
-      // category, exactly as saveDraft preserved them.
-      const existing = draftId ? s.messages.find((m) => m.messageId === draftId) : undefined
-      const message: Message = {
-        messageId: makeMessageId(),
-        inReplyTo: existing?.inReplyTo,
-        references: existing?.references ?? [],
-        from: account.identity,
-        to: recipients,
-        cc: [],
-        subject: subject || '(no subject)',
-        date: new Date().toISOString(),
-        body: [...toParagraphs(body), s.signature],
-        bodyHtml: html ? withSignatureHtml(html, s.signature) : undefined,
-        accountId: account.id,
-        folder: 'sent',
-        flags: { seen: true, flagged: false, answered: false },
-        category: existing?.category ?? 'people',
-        important: false
-      }
-      return {
-        messages: [
-          message,
-          ...s.messages
-            .filter((m) => m.messageId !== draftId)
-            .map((m) =>
-              existing?.inReplyTo && m.messageId === existing.inReplyTo
-                ? { ...m, flags: { ...m.flags, answered: true } }
-                : m
-            )
-        ],
-        contacts: collectContacts(s.contacts, recipients),
-        composer: { open: false, draftId: null }
-      }
-    }),
+  sendMessage: ({ to, subject, body, html, accountId, draftId }) => {
+    const s0 = get()
+    const account = s0.accounts.find((a) => a.id === accountId) ?? s0.accounts[0]
+    if (!account) return
+    const recipients = parseAddressList(to)
+    // Sending a draft keeps its threading chain (In-Reply-To/References) and
+    // category, exactly as saveDraft preserved them.
+    const existing = draftId ? s0.messages.find((m) => m.messageId === draftId) : undefined
+    const message: Message = {
+      messageId: makeMessageId(),
+      inReplyTo: existing?.inReplyTo,
+      references: existing?.references ?? [],
+      threadId: existing?.threadId,
+      from: account.identity,
+      to: recipients,
+      cc: [],
+      subject: subject || '(no subject)',
+      date: new Date().toISOString(),
+      body: [...toParagraphs(body), s0.signature],
+      bodyHtml: html ? withSignatureHtml(html, s0.signature) : undefined,
+      accountId: account.id,
+      folder: 'sent',
+      flags: { seen: true, flagged: false, answered: false },
+      category: existing?.category ?? 'people',
+      important: false
+    }
+    set((s) => ({
+      messages: [
+        message,
+        ...s.messages
+          .filter((m) => m.messageId !== draftId)
+          .map((m) =>
+            existing?.inReplyTo && m.messageId === existing.inReplyTo
+              ? { ...m, flags: { ...m.flags, answered: true } }
+              : m
+          )
+      ],
+      contacts: collectContacts(s.contacts, recipients),
+      composer: { open: false, draftId: null }
+    }))
+    // Composer sends go out immediately (the reply toast's Undo is the delayed path)
+    if (get().connected) dispatchSend(message)
+  },
   saveDraft: ({ to, subject, body, html, accountId, draftId }) =>
     set((s) => {
       const account = s.accounts.find((a) => a.id === accountId) ?? s.accounts[0]
@@ -431,6 +487,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       messageId: makeMessageId(),
       inReplyTo: latest.messageId,
       references: [...latest.references, latest.messageId],
+      threadId: [...inThread].reverse().find((m) => m.threadId)?.threadId,
       from: account.identity,
       to: recipients,
       cc: [],
@@ -453,9 +510,12 @@ export const useAppStore = create<AppState>()((set, get) => ({
       ],
       contacts: collectContacts(s.contacts, recipients)
     })
+    // Held for the Undo window, then dispatched to Gmail
+    queueSend(reply)
     return reply.messageId
   },
-  unsend: (messageId) =>
+  unsend: (messageId) => {
+    cancelPendingSend(messageId)
     set((s) => {
       const target = s.messages.find((m) => m.messageId === messageId)
       if (!target || target.folder !== 'sent') return {}
@@ -473,7 +533,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
             : m
         )
       }
-    }),
+    })
+  },
   scheduleReply: (threadId, body, html, delayMs) => {
     window.setTimeout(() => get().sendReply(threadId, body, html), delayMs)
   },

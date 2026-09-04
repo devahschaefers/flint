@@ -158,6 +158,17 @@ export class GmailApi {
     )
   }
 
+  /** Send a raw RFC 822 message; threadId appends it to an existing conversation */
+  async send(raw: Buffer, threadId?: string): Promise<string> {
+    const res = await this.call('messages.send', () =>
+      this.g.users.messages.send({
+        userId: 'me',
+        requestBody: { raw: raw.toString('base64url'), threadId }
+      })
+    )
+    return res.id ?? ''
+  }
+
   async trash(id: string): Promise<void> {
     await this.call('messages.trash', () => this.g.users.messages.trash({ userId: 'me', id }))
   }
