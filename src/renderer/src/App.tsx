@@ -3,6 +3,7 @@ import IconRail from './components/sidebar/IconRail'
 import SidebarPanel from './components/sidebar/SidebarPanel'
 import SearchOverlay from './components/search/SearchOverlay'
 import ComposerModal from './components/compose/ComposerModal'
+import OutboxBanner from './components/inbox/OutboxBanner'
 import SmartInboxView from './views/SmartInboxView'
 import GroupListView from './views/GroupListView'
 import FolderListView from './views/FolderListView'
@@ -73,6 +74,7 @@ export default function App(): React.JSX.Element {
         {view.name === 'folder' && <FolderListView folder={view.folder} />}
         {view.name === 'thread' && <ThreadView key={view.threadId} threadId={view.threadId} />}
         {view.name === 'settings' && <SettingsView />}
+        <OutboxBanner />
       </main>
       <SidebarPanel />
       <SearchOverlay />

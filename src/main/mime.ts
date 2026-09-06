@@ -16,6 +16,12 @@ export interface OutgoingMail {
   /** Parent Message-ID header, for reply threading */
   inReplyTo?: string
   references: string[]
+  /**
+   * Our own Message-ID header. Sending it (rather than letting MailComposer
+   * mint one) is what lets the synced copy Gmail hands back be matched to the
+   * local row it came from.
+   */
+  messageId?: string
 }
 
 export function buildMime(mail: OutgoingMail): Promise<Buffer> {
@@ -27,7 +33,8 @@ export function buildMime(mail: OutgoingMail): Promise<Buffer> {
     text: mail.text,
     html: mail.html,
     inReplyTo: mail.inReplyTo,
-    references: mail.references.length > 0 ? mail.references : undefined
+    references: mail.references.length > 0 ? mail.references : undefined,
+    messageId: mail.messageId
   }
   return new Promise((resolve, reject) => {
     new MailComposer(options).compile().build((err, message) => {

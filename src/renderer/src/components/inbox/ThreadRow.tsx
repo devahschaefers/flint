@@ -5,6 +5,7 @@ import { resolveMailbox, resolveNames } from '../../lib/identity'
 import type { Thread } from '../../lib/threads'
 import { cn } from '../../lib/utils'
 import { isOwnAddress, useAppStore } from '../../store'
+import SendStatus from './SendStatus'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -116,6 +117,7 @@ export default function ThreadRow({ thread, onClick }: ThreadRowProps): React.JS
             {thread.latest.folder === 'drafts' && (
               <span className="font-normal text-red-3">{'  Draft'}</span>
             )}
+            <SendStatus message={thread.latest} className="ml-2 align-middle" />
             <span className="font-normal text-text-secondary">{'  ' + preview}</span>
           </span>
 

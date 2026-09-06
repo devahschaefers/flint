@@ -1,10 +1,17 @@
 import { create } from 'zustand'
-import type { Account, Category, Contact, Folder, Mailbox, Message } from './data/types'
+import type { Account, Category, Contact, Message } from './data/types'
 import { parseAddressList } from './lib/address'
 import { threadRootId } from './lib/threads'
 import { deriveContacts, wireToAccount, wireToMessage } from './lib/wire'
-import type { MailAction, SendMailInput } from '../../preload/index.d'
+import type { LocalMessageInput, MailAction, WireOp } from '../../preload/index.d'
 import type { RailItem } from './components/sidebar/IconRail'
+
+/**
+ * Renderer state. Everything durable (mail, drafts, outgoing messages, the
+ * outbox, settings) lives in SQLite in the main process; this store is a view
+ * over it plus navigation. Mutations go over IPC and come back through the
+ * `mail:changed` push, so nothing here is ever the only copy.
+ */
 
 /** Folder-style lists reachable from the rail/sidebar ('pins' = flagged, not a folder) */
 export type FolderView = 'pins' | 'drafts' | 'sent' | 'trash' | 'spam' | 'archive'
@@ -29,11 +36,18 @@ export function isOwnAddress(address: string): boolean {
 /** Cap on hydrated messages per account (server-side paged queries replace this later) */
 const WINDOW_PER_ACCOUNT = 1500
 
+/** Undo window before a reply actually leaves the machine */
+const UNDO_SEND_MS = 5000
+
 function hasMailApi(): boolean {
   return typeof window.api?.listAccounts === 'function'
 }
 
-/** Push a UI action to Gmail for the affected synced messages (fire-and-forget) */
+function logFailure(what: string): (err: unknown) => void {
+  return (err) => console.error(`${what} failed:`, err)
+}
+
+/** Queue a label action for the affected synced messages (main mirrors it locally at once) */
 function remoteAction(affected: Message[], action: MailAction, value?: boolean): void {
   if (!useAppStore.getState().connected) return
   const byAccount = new Map<string, string[]>()
@@ -42,15 +56,13 @@ function remoteAction(affected: Message[], action: MailAction, value?: boolean):
     byAccount.set(m.accountId, [...(byAccount.get(m.accountId) ?? []), m.gmailId])
   }
   for (const [accountId, gmailIds] of byAccount) {
-    window.api.mailAction({ accountId, gmailIds, action, value }).catch((err) => {
-      console.error('mail action failed:', err)
-    })
+    window.api.mailAction({ accountId, gmailIds, action, value }).catch(logFailure('mail action'))
   }
 }
 
 let reloading = false
 let reloadQueued = false
-/** Re-hydrate messages/contacts from the local DB, keeping unsynced local messages */
+/** Re-hydrate messages, contacts, and outbox status from the local DB */
 async function reloadMail(): Promise<void> {
   if (reloading) {
     reloadQueued = true
@@ -58,16 +70,18 @@ async function reloadMail(): Promise<void> {
   }
   reloading = true
   try {
-    const wires = await window.api.getMailWindow(WINDOW_PER_ACCOUNT)
+    const [wires, outbox] = await Promise.all([
+      window.api.getMailWindow(WINDOW_PER_ACCOUNT),
+      window.api.listOutbox()
+    ])
     const s = useAppStore.getState()
     if (!s.connected) return
-    const synced = wires.map(wireToMessage)
-    // Locally-composed mail (sent/drafts without a gmailId) survives reloads
-    const localOnly = s.messages.filter((m) => !m.gmailId)
+    const messages = wires.map(wireToMessage)
     const own = new Set(s.accounts.map((a) => a.identity.address.toLowerCase()))
     useAppStore.setState({
-      messages: [...localOnly, ...synced],
-      contacts: deriveContacts(synced, own)
+      messages,
+      contacts: deriveContacts(messages, own),
+      outbox
     })
   } finally {
     reloading = false
@@ -85,59 +99,6 @@ function subscribeOnce(): void {
   window.api.onMailChanged(() => void reloadMail())
 }
 
-/** Undo window before a reply actually leaves the machine */
-const UNDO_SEND_MS = 5000
-const pendingSends = new Map<string, number>()
-
-function toSendInput(local: Message): SendMailInput {
-  return {
-    accountId: local.accountId,
-    to: local.to,
-    cc: local.cc,
-    subject: local.subject,
-    text: local.body.join('\n\n'),
-    html: local.bodyHtml,
-    inReplyTo: local.inReplyTo,
-    references: local.references,
-    threadId: local.threadId
-  }
-}
-
-/** Really send: on success the optimistic local copy is swapped for Gmail's synced one */
-function dispatchSend(local: Message): void {
-  window.api
-    .sendMail(toSendInput(local))
-    .then((wire) => {
-      useAppStore.setState((s) => ({
-        messages: [
-          wireToMessage(wire),
-          ...s.messages.filter((m) => m.messageId !== local.messageId)
-        ]
-      }))
-    })
-    .catch((err) => {
-      console.error('[send] failed — message kept locally only:', err)
-    })
-}
-
-/** Delayed send backing the reply toast's Undo */
-function queueSend(local: Message): void {
-  if (!useAppStore.getState().connected) return
-  const timer = window.setTimeout(() => {
-    pendingSends.delete(local.messageId)
-    dispatchSend(local)
-  }, UNDO_SEND_MS)
-  pendingSends.set(local.messageId, timer)
-}
-
-function cancelPendingSend(messageId: string): void {
-  const timer = pendingSends.get(messageId)
-  if (timer !== undefined) {
-    window.clearTimeout(timer)
-    pendingSends.delete(messageId)
-  }
-}
-
 function toParagraphs(text: string): string[] {
   return text
     .split(/\n{2,}|\n/)
@@ -150,20 +111,6 @@ function threadMessages(messages: Message[], threadId: string): Message[] {
   return messages
     .filter((m) => threadRootId(m) === threadId)
     .sort((a, b) => a.date.localeCompare(b.date))
-}
-
-/** Auto-learn recipients into contacts (Gmail's "other contacts") without overwriting */
-function collectContacts(contacts: Contact[], recipients: Mailbox[]): Contact[] {
-  const known = new Set(contacts.map((c) => c.address))
-  const learned: Contact[] = []
-  for (const r of recipients) {
-    const key = r.address.toLowerCase()
-    if (!known.has(key) && r.name && !isOwnAddress(key)) {
-      known.add(key)
-      learned.push({ address: key, name: r.name, source: 'collected' })
-    }
-  }
-  return learned.length ? [...contacts, ...learned] : contacts
 }
 
 export interface ComposerInput {
@@ -187,6 +134,18 @@ function withSignatureHtml(html: string, signature: string): string {
   return `${html}<p>${escapeHtml(signature)}</p>`
 }
 
+/** Plain-text part: paragraphs, then the signature as its own paragraph */
+function withSignatureText(body: string, signature: string): string {
+  return [...toParagraphs(body), signature].join('\n\n')
+}
+
+/** Settings keys as stored in main's config table */
+const SETTING_KEYS = {
+  signature: 'signature',
+  hideDone: 'hide_done',
+  showWordCount: 'show_word_count'
+} as const
+
 interface AppState {
   view: View
   prevView: View | null
@@ -198,14 +157,17 @@ interface AppState {
   connected: boolean
   messages: Message[]
   contacts: Contact[]
+  /** Outbox operations that have hit at least one error (retrying or parked) */
+  outbox: WireOp[]
   /** When true (default) archived threads are hidden from the inbox lists */
   hideDone: boolean
   searchOpen: boolean
   composer: { open: boolean; draftId: string | null }
   signature: string
+  showWordCount: boolean
   refreshCount: number
 
-  /** Hydrate accounts + mail from the local DB (empty state when no account) */
+  /** Hydrate accounts, settings, and mail from the local DB (empty state when no account) */
   init: () => Promise<void>
 
   // navigation
@@ -228,12 +190,19 @@ interface AppState {
   deleteDraft: (messageId: string) => void
   sendMessage: (input: ComposerInput) => void
   saveDraft: (input: ComposerInput) => void
-  /** Returns the sent reply's Message-ID (for undo), or null when nothing was sent */
+  /** Queues the reply (undo window first); returns its Message-ID, or null when nothing was sent */
   sendReply: (threadId: string, body: string, html?: string) => string | null
-  /** Remove a just-sent message and revert the parent's \Answered flag (toast Undo) */
+  /** Pull a queued reply back before it leaves (toast Undo) */
   unsend: (messageId: string) => void
-  /** "Send later": fires sendReply after the delay (in-session scheduler) */
+  /** "Send later": queues the reply to leave after the delay; persisted, survives restarts */
   scheduleReply: (threadId: string, body: string, html: string | undefined, delayMs: number) => void
+  /** Turn a scheduled (or failed) message back into a draft */
+  cancelScheduled: (messageId: string) => void
+  /** Re-queue a failed send */
+  retrySend: (messageId: string) => void
+  /** Outbox recovery: push every errored op again, or drop them and re-fetch from Gmail */
+  retryOutbox: () => void
+  discardOutbox: () => void
   refreshInbox: () => void
 
   // ui state
@@ -242,7 +211,6 @@ interface AppState {
   openCompose: (draftId?: string | null) => void
   closeCompose: () => void
   setSignature: (signature: string) => void
-  showWordCount: boolean
   toggleShowWordCount: () => void
 }
 
@@ -256,21 +224,32 @@ export const useAppStore = create<AppState>()((set, get) => ({
   connected: false,
   messages: [],
   contacts: [],
+  outbox: [],
   hideDone: true,
   searchOpen: false,
   composer: { open: false, draftId: null },
-  signature: 'Devah',
+  signature: '',
+  showWordCount: true,
   refreshCount: 0,
 
   init: async () => {
     if (!hasMailApi()) return
-    const wireAccounts = await window.api.listAccounts()
+    const [wireAccounts, settings] = await Promise.all([
+      window.api.listAccounts(),
+      window.api.getSettings()
+    ])
+    set({
+      signature: settings[SETTING_KEYS.signature] ?? '',
+      hideDone: settings[SETTING_KEYS.hideDone] !== 'false',
+      showWordCount: settings[SETTING_KEYS.showWordCount] !== 'false'
+    })
     if (wireAccounts.length === 0) {
       set({
         connected: false,
         accounts: [],
         messages: [],
         contacts: [],
+        outbox: [],
         activeAccountId: 'all'
       })
       return
@@ -279,9 +258,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set((s) => ({
       connected: true,
       accounts: accs,
-      // Drop whatever was on screen; reload refills
-      messages: [],
-      contacts: [],
       activeAccountId:
         s.activeAccountId !== 'all' && !accs.some((a) => a.id === s.activeAccountId)
           ? 'all'
@@ -297,12 +273,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const unseen = threadMessages(get().messages, threadId).filter((m) => !m.flags.seen)
     set((s) => ({
       view: { name: 'thread', threadId },
-      prevView: s.view.name === 'thread' || s.view.name === 'settings' ? s.prevView : s.view,
-      messages: s.messages.map((m) =>
-        threadRootId(m) === threadId && !m.flags.seen
-          ? { ...m, flags: { ...m.flags, seen: true } }
-          : m
-      )
+      prevView: s.view.name === 'thread' || s.view.name === 'settings' ? s.prevView : s.view
     }))
     remoteAction(unseen, 'seen', true)
   },
@@ -331,14 +302,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   toggleArchiveThread: (threadId) => {
     const inThread = threadMessages(get().messages, threadId)
     const anyInbox = inThread.some((m) => m.folder === 'inbox')
-    set((s) => ({
-      messages: s.messages.map((m) => {
-        if (threadRootId(m) !== threadId) return m
-        if (anyInbox && m.folder === 'inbox') return { ...m, folder: 'archive' as Folder }
-        if (!anyInbox && m.folder === 'archive') return { ...m, folder: 'inbox' as Folder }
-        return m
-      })
-    }))
     if (anyInbox) {
       remoteAction(
         inThread.filter((m) => m.folder === 'inbox'),
@@ -353,205 +316,170 @@ export const useAppStore = create<AppState>()((set, get) => ({
   },
   archiveThreads: (threadIds) => {
     const ids = new Set(threadIds)
-    const affected = get().messages.filter(
-      (m) => ids.has(threadRootId(m)) && m.folder === 'inbox'
-    )
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        ids.has(threadRootId(m)) && m.folder === 'inbox' ? { ...m, folder: 'archive' } : m
-      )
-    }))
+    const affected = get().messages.filter((m) => ids.has(threadRootId(m)) && m.folder === 'inbox')
     remoteAction(affected, 'archive')
   },
   toggleFlagged: (threadId) => {
     const inThread = threadMessages(get().messages, threadId)
     const anyFlagged = inThread.some((m) => m.flags.flagged)
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        threadRootId(m) === threadId ? { ...m, flags: { ...m.flags, flagged: !anyFlagged } } : m
-      )
-    }))
     remoteAction(inThread, 'flagged', !anyFlagged)
   },
   toggleSeen: (threadId) => {
     const inThread = threadMessages(get().messages, threadId)
     const anyUnseen = inThread.some((m) => !m.flags.seen)
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        threadRootId(m) === threadId ? { ...m, flags: { ...m.flags, seen: anyUnseen } } : m
-      )
-    }))
     remoteAction(inThread, 'seen', anyUnseen)
   },
   moveThread: (threadId, folder) => {
     const affected = threadMessages(get().messages, threadId).filter(
       (m) => m.folder !== 'sent' && m.folder !== 'drafts'
     )
-    set((s) => ({
-      messages: s.messages.map((m) =>
-        threadRootId(m) === threadId && m.folder !== 'sent' && m.folder !== 'drafts'
-          ? { ...m, folder }
-          : m
-      )
-    }))
     remoteAction(affected, folder)
   },
-  deleteDraft: (messageId) =>
-    set((s) => ({ messages: s.messages.filter((m) => m.messageId !== messageId) })),
+  deleteDraft: (messageId) => {
+    const draft = get().messages.find((m) => m.messageId === messageId)
+    if (!draft) return
+    window.api.deleteLocalMessage(draft.accountId, messageId).catch(logFailure('delete draft'))
+  },
   sendMessage: ({ to, subject, body, html, accountId, draftId }) => {
     const s0 = get()
     const account = s0.accounts.find((a) => a.id === accountId) ?? s0.accounts[0]
-    if (!account) return
-    const recipients = parseAddressList(to)
+    if (!account || !s0.connected) return
     // Sending a draft keeps its threading chain (In-Reply-To/References) and
     // category, exactly as saveDraft preserved them.
     const existing = draftId ? s0.messages.find((m) => m.messageId === draftId) : undefined
-    const message: Message = {
-      messageId: makeMessageId(),
+    const input: LocalMessageInput = {
+      accountId: account.id,
+      messageIdHdr: draftId ?? makeMessageId(),
+      to: parseAddressList(to),
+      cc: [],
+      subject: subject || '(no subject)',
+      text: withSignatureText(body, s0.signature),
+      html: html ? withSignatureHtml(html, s0.signature) : undefined,
       inReplyTo: existing?.inReplyTo,
       references: existing?.references ?? [],
       threadId: existing?.threadId,
-      from: account.identity,
-      to: recipients,
+      category: existing?.category ?? 'people'
+    }
+    set({ composer: { open: false, draftId: null } })
+    // Composer sends go out immediately (the reply toast's Undo is the delayed path)
+    window.api.queueSend(input, Date.now()).catch(logFailure('send'))
+  },
+  saveDraft: ({ to, subject, body, html, accountId, draftId }) => {
+    const s = get()
+    const account = s.accounts.find((a) => a.id === accountId) ?? s.accounts[0]
+    if (!account || !s.connected) return
+    const existing = draftId ? s.messages.find((m) => m.messageId === draftId) : undefined
+    const input: LocalMessageInput = {
+      accountId: account.id,
+      messageIdHdr: draftId ?? makeMessageId(),
+      to: parseAddressList(to),
       cc: [],
       subject: subject || '(no subject)',
-      date: new Date().toISOString(),
-      body: [...toParagraphs(body), s0.signature],
-      bodyHtml: html ? withSignatureHtml(html, s0.signature) : undefined,
-      accountId: account.id,
-      folder: 'sent',
-      flags: { seen: true, flagged: false, answered: false },
-      category: existing?.category ?? 'people',
-      important: false
+      text: toParagraphs(body).join('\n\n'),
+      html,
+      inReplyTo: existing?.inReplyTo,
+      references: existing?.references ?? [],
+      threadId: existing?.threadId,
+      category: existing?.category ?? 'people'
     }
-    set((s) => ({
-      messages: [
-        message,
-        ...s.messages
-          .filter((m) => m.messageId !== draftId)
-          .map((m) =>
-            existing?.inReplyTo && m.messageId === existing.inReplyTo
-              ? { ...m, flags: { ...m.flags, answered: true } }
-              : m
-          )
-      ],
-      contacts: collectContacts(s.contacts, recipients),
-      composer: { open: false, draftId: null }
-    }))
-    // Composer sends go out immediately (the reply toast's Undo is the delayed path)
-    if (get().connected) dispatchSend(message)
+    set({ composer: { open: false, draftId: null } })
+    window.api.saveDraft(input).catch(logFailure('save draft'))
   },
-  saveDraft: ({ to, subject, body, html, accountId, draftId }) =>
-    set((s) => {
-      const account = s.accounts.find((a) => a.id === accountId) ?? s.accounts[0]
-      if (!account) return {}
-      const existing = draftId ? s.messages.find((m) => m.messageId === draftId) : undefined
-      const draft: Message = {
-        messageId: draftId ?? makeMessageId(),
-        inReplyTo: existing?.inReplyTo,
-        references: existing?.references ?? [],
-        from: account.identity,
-        to: parseAddressList(to),
-        cc: [],
-        subject: subject || '(no subject)',
-        date: new Date().toISOString(),
-        body: toParagraphs(body),
-        bodyHtml: html,
-        accountId: account.id,
-        folder: 'drafts',
-        flags: { seen: true, flagged: false, answered: false },
-        category: 'people',
-        important: false
-      }
-      return {
-        messages: [draft, ...s.messages.filter((m) => m.messageId !== draftId)],
-        composer: { open: false, draftId: null }
-      }
-    }),
-  sendReply: (threadId, body, html) => {
-    const s = get()
-    if (!body.trim()) return null
-    const inThread = threadMessages(s.messages, threadId)
-    if (inThread.length === 0) return null
-    const latest = inThread[inThread.length - 1]
-    // Reply targets the latest counterpart message: its Reply-To/From, unless
-    // that is us (replying on our own sent thread) — then keep writing to its To.
-    const counterpart = [...inThread].reverse().find((m) => !isOwnAddress(m.from.address))
-    const target = counterpart ?? latest
-    const recipients = isOwnAddress(target.from.address)
-      ? target.to
-      : [target.replyTo ?? target.from]
-    const account = s.accounts.find((a) => a.id === target.accountId) ?? s.accounts[0]
-    if (!account) return null
-    const reply: Message = {
-      messageId: makeMessageId(),
-      inReplyTo: latest.messageId,
-      references: [...latest.references, latest.messageId],
-      threadId: [...inThread].reverse().find((m) => m.threadId)?.threadId,
-      from: account.identity,
-      to: recipients,
-      cc: [],
-      subject: latest.subject.match(/^re:/i) ? latest.subject : `Re: ${latest.subject}`,
-      date: new Date().toISOString(),
-      body: [...toParagraphs(body), s.signature],
-      bodyHtml: html ? withSignatureHtml(html, s.signature) : undefined,
-      accountId: account.id,
-      folder: 'sent',
-      flags: { seen: true, flagged: false, answered: false },
-      category: latest.category,
-      important: false
-    }
-    set({
-      messages: [
-        reply,
-        ...s.messages.map((m) =>
-          m.messageId === target.messageId ? { ...m, flags: { ...m.flags, answered: true } } : m
-        )
-      ],
-      contacts: collectContacts(s.contacts, recipients)
-    })
-    // Held for the Undo window, then dispatched to Gmail
-    queueSend(reply)
-    return reply.messageId
-  },
+  sendReply: (threadId, body, html) => queueReply(get(), threadId, body, html, UNDO_SEND_MS),
   unsend: (messageId) => {
-    cancelPendingSend(messageId)
-    set((s) => {
-      const target = s.messages.find((m) => m.messageId === messageId)
-      if (!target || target.folder !== 'sent') return {}
-      const rest = s.messages.filter((m) => m.messageId !== messageId)
-      const parentId = target.inReplyTo
-      if (!parentId) return { messages: rest }
-      // \Answered stays only if another of our replies still points at the parent
-      const stillAnswered = rest.some(
-        (m) => m.inReplyTo === parentId && isOwnAddress(m.from.address)
-      )
-      return {
-        messages: rest.map((m) =>
-          m.messageId === parentId && !stillAnswered
-            ? { ...m, flags: { ...m.flags, answered: false } }
-            : m
-        )
-      }
-    })
+    const target = get().messages.find((m) => m.messageId === messageId)
+    if (!target) return
+    window.api.cancelSend(target.accountId, messageId, false).catch(logFailure('undo send'))
   },
   scheduleReply: (threadId, body, html, delayMs) => {
-    window.setTimeout(() => get().sendReply(threadId, body, html), delayMs)
+    queueReply(get(), threadId, body, html, delayMs)
+  },
+  cancelScheduled: (messageId) => {
+    const target = get().messages.find((m) => m.messageId === messageId)
+    if (!target) return
+    window.api.cancelSend(target.accountId, messageId, true).catch(logFailure('cancel send'))
+  },
+  retrySend: (messageId) => {
+    const target = get().messages.find((m) => m.messageId === messageId)
+    if (!target) return
+    window.api.retrySend(target.accountId, messageId).catch(logFailure('retry send'))
+  },
+  retryOutbox: () => {
+    window.api.retryOutbox().catch(logFailure('retry outbox'))
+  },
+  discardOutbox: () => {
+    window.api.discardOutbox().catch(logFailure('discard outbox'))
   },
   refreshInbox: () => {
     if (!get().connected) return
-    void window.api.refresh().catch((err) => console.error('refresh failed:', err))
+    void window.api.refresh().catch(logFailure('refresh'))
     set((s) => ({ refreshCount: s.refreshCount + 1 }))
   },
 
-  toggleHideDone: () => set((s) => ({ hideDone: !s.hideDone })),
+  toggleHideDone: () => {
+    const hideDone = !get().hideDone
+    set({ hideDone })
+    persistSetting(SETTING_KEYS.hideDone, String(hideDone))
+  },
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   openCompose: (draftId = null) => set({ composer: { open: true, draftId } }),
   closeCompose: () => set({ composer: { open: false, draftId: null } }),
-  setSignature: (signature) => set({ signature }),
-  showWordCount: true,
-  toggleShowWordCount: () => set((s) => ({ showWordCount: !s.showWordCount }))
+  setSignature: (signature) => {
+    set({ signature })
+    persistSetting(SETTING_KEYS.signature, signature)
+  },
+  toggleShowWordCount: () => {
+    const showWordCount = !get().showWordCount
+    set({ showWordCount })
+    persistSetting(SETTING_KEYS.showWordCount, String(showWordCount))
+  }
 }))
+
+function persistSetting(key: string, value: string): void {
+  if (!hasMailApi()) return
+  window.api.setSetting(key, value).catch(logFailure('save setting'))
+}
+
+/**
+ * Build a reply to the latest counterpart in a thread and queue it to leave
+ * after `delayMs`. Recipients and body are fixed now and persisted with the
+ * message, so later activity in the thread cannot change where it goes.
+ */
+function queueReply(
+  s: AppState,
+  threadId: string,
+  body: string,
+  html: string | undefined,
+  delayMs: number
+): string | null {
+  if (!body.trim() || !s.connected) return null
+  const inThread = threadMessages(s.messages, threadId)
+  if (inThread.length === 0) return null
+  const latest = inThread[inThread.length - 1]
+  // Reply targets the latest counterpart message: its Reply-To/From, unless
+  // that is us (replying on our own sent thread) — then keep writing to its To.
+  const counterpart = [...inThread].reverse().find((m) => !isOwnAddress(m.from.address))
+  const target = counterpart ?? latest
+  const recipients = isOwnAddress(target.from.address) ? target.to : [target.replyTo ?? target.from]
+  const account = s.accounts.find((a) => a.id === target.accountId) ?? s.accounts[0]
+  if (!account) return null
+  const messageIdHdr = makeMessageId()
+  const input: LocalMessageInput = {
+    accountId: account.id,
+    messageIdHdr,
+    to: recipients,
+    cc: [],
+    subject: latest.subject.match(/^re:/i) ? latest.subject : `Re: ${latest.subject}`,
+    text: withSignatureText(body, s.signature),
+    html: html ? withSignatureHtml(html, s.signature) : undefined,
+    inReplyTo: latest.messageId,
+    references: [...latest.references, latest.messageId],
+    threadId: [...inThread].reverse().find((m) => m.threadId)?.threadId,
+    category: latest.category
+  }
+  window.api.queueSend(input, Date.now() + delayMs).catch(logFailure('send reply'))
+  return messageIdHdr
+}
 
 /** Messages visible under the current account filter */
 export function filterByAccount(messages: Message[], activeAccountId: string): Message[] {

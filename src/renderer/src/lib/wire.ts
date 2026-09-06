@@ -23,13 +23,16 @@ export function wireToMessage(w: WireMessage): Message {
     date: new Date(w.dateMs).toISOString(),
     body: toParagraphs(w.bodyText || w.snippet),
     bodyHtml: w.bodyHtml ?? undefined,
-    gmailId: w.gmailId,
-    threadId: w.threadId,
+    gmailId: w.gmailId ?? undefined,
+    threadId: w.threadId ?? undefined,
     accountId: w.accountId,
     folder: w.folder,
     flags: { seen: w.seen, flagged: w.flagged, answered: w.answered },
     category: w.category as Category,
-    important: w.important
+    important: w.important,
+    state: w.state,
+    sendAfter: w.sendAfterMs ? new Date(w.sendAfterMs).toISOString() : undefined,
+    sendError: w.sendError ?? undefined
   }
 }
 

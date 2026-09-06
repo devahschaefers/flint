@@ -8,6 +8,7 @@ import { resolveMailbox, resolveNames } from '../lib/identity'
 import { isOwnAddress, useAppStore } from '../store'
 import { cn } from '../lib/utils'
 import HeaderControls from '../components/inbox/HeaderControls'
+import SendStatus from '../components/inbox/SendStatus'
 import ReplyComposer from '../components/compose/ReplyComposer'
 import type { Contact, Message } from '../data/types'
 
@@ -39,6 +40,7 @@ function MessageBlock({ message, contacts, isDraft }: MessageBlockProps): React.
           <span className="text-[13px] font-semibold text-text-primary">
             {own ? 'You' : resolved.name}
             {isDraft && <span className="ml-2 text-[11px] font-semibold text-red-3">Draft</span>}
+            <SendStatus message={message} withActions className="ml-2 align-middle" />
           </span>
           <span className="truncate text-[12px] text-text-secondary">{message.from.address}</span>
           <span className="truncate text-[11px] text-text-muted">
@@ -87,7 +89,11 @@ interface CollapsedMessageProps {
 }
 
 /** Older messages fold to one clickable line: sender name + first body line. */
-function CollapsedMessage({ message, contacts, onExpand }: CollapsedMessageProps): React.JSX.Element {
+function CollapsedMessage({
+  message,
+  contacts,
+  onExpand
+}: CollapsedMessageProps): React.JSX.Element {
   const resolved = resolveMailbox(message.from, contacts)
   const name = isOwnAddress(message.from.address) ? 'You' : resolved.name
 
@@ -191,8 +197,7 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
 
           <div className="mt-5">
             {thread.messages.map((message, i) => {
-              const alwaysExpanded =
-                thread.messages.length <= 2 || i >= thread.messages.length - 2
+              const alwaysExpanded = thread.messages.length <= 2 || i >= thread.messages.length - 2
               const expanded = alwaysExpanded || expandedIds.has(message.messageId)
               const isDraft = message.folder === 'drafts'
               return (

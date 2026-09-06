@@ -1,22 +1,26 @@
-import { BrowserWindow } from 'electron'
 import { randomUUID } from 'crypto'
 import { OAuth2Client } from 'google-auth-library'
 import * as db from './db'
 import { GmailApi, GmailError, labelsToState } from './google/gmail'
 import { runAuthFlow } from './google/oauth'
 import { GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET } from './google/clientDefaults'
-import { buildMime } from './mime'
-import type { MailAction, SendMailInput, SyncStatus, WireAccount, WireMessage } from '../preload/index.d'
+import { notifyMailChanged } from './notify'
+import type { SyncStatus, WireAccount } from '../preload/index.d'
 
 /**
- * Per-account Gmail sync. Initial backfill walks the whole mailbox newest-first
- * with a resumable page-token checkpoint; steady-state sync applies history
- * deltas anchored at the historyId captured when the account was added.
+ * Per-account Gmail sync (the read side). Initial backfill walks the whole
+ * mailbox newest-first with a resumable page-token checkpoint; steady-state
+ * sync applies history deltas anchored at the historyId captured when the
+ * account was added. Writes to Gmail live in the outbox.
  */
 
 const ACCOUNT_COLORS = ['#4E9BF5', '#E5684F', '#43B581', '#B57EDC', '#E8B04C', '#5CC9C2']
 const BACKFILL_CONCURRENCY = 6
 const DELTA_INTERVAL_MS = 60_000
+/** Newest remote messages a full resync will fetch when they are missing locally */
+const RESYNC_NEW_CAP = 2000
+/** Labels that determine folder + flags (see labelsToState) */
+const STATE_LABELS = ['INBOX', 'UNREAD', 'STARRED', 'IMPORTANT', 'TRASH', 'SPAM', 'DRAFT', 'SENT']
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -45,7 +49,6 @@ class SyncEngine {
   private apis = new Map<string, GmailApi>()
   private backfilling = new Set<string>()
   private deltaRunning = new Set<string>()
-  private notifyTimer: NodeJS.Timeout | null = null
 
   /** Built-in OAuth client, overridable via config rows (for forks) */
   private clientConfig(): { clientId: string; clientSecret: string } {
@@ -75,7 +78,7 @@ class SyncEngine {
     return client
   }
 
-  private api(accountId: string): GmailApi {
+  api(accountId: string): GmailApi {
     let api = this.apis.get(accountId)
     if (!api) {
       api = new GmailApi(this.authClient(accountId))
@@ -120,7 +123,7 @@ class SyncEngine {
     db.deleteAccount(accountId)
     this.authClients.delete(accountId)
     this.apis.delete(accountId)
-    this.notify()
+    notifyMailChanged(true)
   }
 
   startBackfill(accountId: string): void {
@@ -141,11 +144,9 @@ class SyncEngine {
       const page = await api.listMessageIds(state.pageToken ?? undefined)
       const fresh = page.ids.filter((id) => !db.hasMessage(accountId, id))
       const parsed = await mapConcurrent(fresh, BACKFILL_CONCURRENCY, (id) => api.getMessage(id))
-      db.upsertMessages(
-        parsed.filter((p) => p !== null).map((p) => ({ ...p, accountId }))
-      )
+      db.upsertMessages(parsed.filter((p) => p !== null).map((p) => ({ ...p, accountId })))
       db.setBackfillState(accountId, page.nextPageToken ?? null, !page.nextPageToken)
-      this.notify()
+      notifyMailChanged()
       if (!page.nextPageToken) {
         console.log(`[sync] backfill complete: ${db.countMessages(accountId)} messages`)
         return
@@ -208,89 +209,65 @@ class SyncEngine {
       } while (pageToken)
       if (latest) db.setHistoryId(accountId, latest)
     } catch (err) {
-      // History window expired — re-anchor and refresh the recent slice
+      // History window expired: Gmail requires a full sync before a new anchor is valid
       if (err instanceof GmailError && err.status === 404) {
-        const profile = await api.getProfile()
-        db.setHistoryId(accountId, profile.historyId)
-        await this.recentResync(accountId)
+        await this.fullResync(accountId)
         changed = true
       } else {
         throw err
       }
     }
-    if (changed) this.notify()
+    if (changed) notifyMailChanged()
   }
 
-  private async recentResync(accountId: string): Promise<void> {
+  /**
+   * Reconcile the cached mailbox against Gmail when history is no longer
+   * available. The new anchor is captured first (anything changing during the
+   * pass is replayed by the next delta) and committed last (a failure leaves
+   * the old anchor in place, so the next tick tries again):
+   *   1. messages Gmail no longer has are deleted locally
+   *   2. folder/flags of everything we hold are recomputed from label listings
+   *   3. the newest messages we don't hold are fetched (capped)
+   */
+  private async fullResync(accountId: string): Promise<void> {
     const api = this.api(accountId)
-    const page = await api.listMessageIds()
-    const parsed = await mapConcurrent(page.ids, BACKFILL_CONCURRENCY, (id) => api.getMessage(id))
-    db.upsertMessages(parsed.filter((p) => p !== null).map((p) => ({ ...p, accountId })))
-  }
+    console.warn(`[sync] history expired for ${accountId}; running a full resync`)
+    const profile = await api.getProfile()
+    const newHistoryId = profile.historyId
 
-  /** Optimistic local write + Gmail label writeback for a UI action */
-  async applyAction(
-    accountId: string,
-    gmailIds: string[],
-    action: MailAction,
-    value?: boolean
-  ): Promise<void> {
-    db.applyLocalAction(accountId, gmailIds, action, value)
-    this.notify()
-    const api = this.api(accountId)
-    switch (action) {
-      case 'seen':
-        await api.batchModify(gmailIds, value ? [] : ['UNREAD'], value ? ['UNREAD'] : [])
-        break
-      case 'flagged':
-        await api.batchModify(gmailIds, value ? ['STARRED'] : [], value ? [] : ['STARRED'])
-        break
-      case 'archive':
-        await api.batchModify(gmailIds, [], ['INBOX'])
-        break
-      case 'unarchive':
-        await api.batchModify(gmailIds, ['INBOX'], [])
-        break
-      case 'trash':
-        for (const id of gmailIds) await api.trash(id)
-        break
-      case 'spam':
-        await api.batchModify(gmailIds, ['SPAM'], ['INBOX'])
-        break
-      case 'inbox':
-        // Coming back from trash needs untrash; harmless 4xx if it wasn't there
-        for (const id of gmailIds) {
-          await api.untrash(id).catch(() => undefined)
-        }
-        await api.batchModify(gmailIds, ['INBOX'], ['SPAM'])
-        break
+    const remoteIds = await api.listAllMessageIds()
+    const local = db.listLabelState(accountId)
+
+    const removed = local.filter((l) => !remoteIds.has(l.gmailId))
+    for (const l of removed) db.deleteMessage(accountId, l.gmailId)
+
+    const labelSets = new Map<string, Set<string>>()
+    for (const label of STATE_LABELS) labelSets.set(label, await api.listAllMessageIds([label]))
+    let relabelled = 0
+    for (const l of local) {
+      if (!remoteIds.has(l.gmailId)) continue
+      const labels = STATE_LABELS.filter((label) => labelSets.get(label)?.has(l.gmailId))
+      const next = labelsToState(labels)
+      if (
+        next.folder !== l.folder ||
+        next.seen !== l.seen ||
+        next.flagged !== l.flagged ||
+        next.important !== l.important
+      ) {
+        db.updateMessageState(accountId, l.gmailId, next)
+        relabelled++
+      }
     }
-  }
 
-  /** Build the RFC 822 message, send it through Gmail, and store the synced copy */
-  async sendMail(input: SendMailInput): Promise<WireMessage> {
-    const account = db.listAccounts().find((a) => a.id === input.accountId)
-    if (!account) throw new Error('Unknown account')
-    const raw = await buildMime({
-      from: { name: account.name, address: account.email },
-      to: input.to,
-      cc: input.cc,
-      subject: input.subject,
-      text: input.text,
-      html: input.html,
-      inReplyTo: input.inReplyTo,
-      references: input.references
-    })
-    const api = this.api(input.accountId)
-    const gmailId = await api.send(raw, input.threadId)
-    // Pull the message back so the local copy carries Gmail's ids and labels
-    const parsed = await api.getMessage(gmailId)
-    if (!parsed) throw new Error('Message sent but could not be read back')
-    db.upsertMessages([{ ...parsed, accountId: input.accountId }])
-    this.notify()
-    const wire = db.getMessageWire(input.accountId, gmailId)
-    if (!wire) throw new Error('Message sent but missing from the local store')
-    return wire
+    const localIds = new Set(local.map((l) => l.gmailId))
+    const missing = [...remoteIds].filter((id) => !localIds.has(id)).slice(0, RESYNC_NEW_CAP)
+    const parsed = await mapConcurrent(missing, BACKFILL_CONCURRENCY, (id) => api.getMessage(id))
+    db.upsertMessages(parsed.filter((p) => p !== null).map((p) => ({ ...p, accountId })))
+
+    db.setHistoryId(accountId, newHistoryId)
+    console.log(
+      `[sync] full resync done: -${removed.length} ~${relabelled} +${missing.length} (remote ${remoteIds.size})`
+    )
   }
 
   status(): SyncStatus[] {
@@ -309,17 +286,6 @@ class SyncEngine {
       for (const account of db.listAccounts()) this.startBackfill(account.id)
       void this.deltaAll()
     }, 1500)
-  }
-
-  /** Trailing-edge throttle so backfill pages don't spam the renderer */
-  private notify(): void {
-    if (this.notifyTimer) return
-    this.notifyTimer = setTimeout(() => {
-      this.notifyTimer = null
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send('mail:changed')
-      }
-    }, 800)
   }
 }
 

@@ -1,7 +1,8 @@
 import { ipcMain } from 'electron'
 import * as db from './db'
+import { outbox } from './outbox'
 import { syncEngine } from './sync'
-import type { GoogleConfig, MailAction, SendMailInput } from '../preload/index.d'
+import type { GoogleConfig, LocalMessageInput, MailAction } from '../preload/index.d'
 
 export function registerIpc(): void {
   ipcMain.handle('config:google:get', (): GoogleConfig => ({
@@ -24,10 +25,33 @@ export function registerIpc(): void {
   ipcMain.handle(
     'mail:action',
     (_e, p: { accountId: string; gmailIds: string[]; action: MailAction; value?: boolean }) =>
-      syncEngine.applyAction(p.accountId, p.gmailIds, p.action, p.value)
+      outbox.applyAction(p.accountId, p.gmailIds, p.action, p.value)
   )
 
-  ipcMain.handle('mail:send', (_e, input: SendMailInput) => syncEngine.sendMail(input))
+  ipcMain.handle('mail:draft:save', (_e, input: LocalMessageInput) => outbox.saveDraft(input))
+  ipcMain.handle('mail:local:delete', (_e, p: { accountId: string; messageIdHdr: string }) =>
+    outbox.deleteLocal(p.accountId, p.messageIdHdr)
+  )
+  ipcMain.handle('mail:send:queue', (_e, p: { input: LocalMessageInput; sendAfterMs: number }) =>
+    outbox.queueSend(p.input, p.sendAfterMs)
+  )
+  ipcMain.handle(
+    'mail:send:cancel',
+    (_e, p: { accountId: string; messageIdHdr: string; asDraft: boolean }) =>
+      outbox.cancelSend(p.accountId, p.messageIdHdr, p.asDraft)
+  )
+  ipcMain.handle('mail:send:retry', (_e, p: { accountId: string; messageIdHdr: string }) =>
+    outbox.retrySend(p.accountId, p.messageIdHdr)
+  )
+
+  ipcMain.handle('outbox:list', () => outbox.listTroubled())
+  ipcMain.handle('outbox:retry', (_e, ids: number[] | null) => outbox.retry(ids))
+  ipcMain.handle('outbox:discard', (_e, ids: number[] | null) => outbox.discard(ids))
+
+  ipcMain.handle('settings:get', () => db.getSettings())
+  ipcMain.handle('settings:set', (_e, p: { key: string; value: string }) =>
+    db.setSetting(p.key, p.value)
+  )
 
   ipcMain.handle('sync:refresh', () => syncEngine.deltaAll())
   ipcMain.handle('sync:status', () => syncEngine.status())

@@ -4,13 +4,11 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { initDb } from './db'
 import { registerIpc } from './ipc'
+import { outbox } from './outbox'
 import { syncEngine } from './sync'
 
 if (is.dev) {
-  app.commandLine.appendSwitch(
-    'remote-debugging-port',
-    process.env['DEBUG_PORT'] ?? '9223'
-  )
+  app.commandLine.appendSwitch('remote-debugging-port', process.env['DEBUG_PORT'] ?? '9223')
 }
 
 function createWindow(): void {
@@ -78,6 +76,7 @@ app.whenReady().then(() => {
   initDb()
   registerIpc()
   syncEngine.startScheduler()
+  outbox.start()
 
   createWindow()
 

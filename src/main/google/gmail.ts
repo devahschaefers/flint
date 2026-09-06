@@ -93,12 +93,17 @@ export class GmailApi {
     return { emailAddress: p.emailAddress ?? '', historyId: p.historyId ?? '' }
   }
 
-  async listMessageIds(pageToken?: string): Promise<{ ids: string[]; nextPageToken?: string }> {
+  async listMessageIds(
+    pageToken?: string,
+    opts: { labelIds?: string[]; maxResults?: number; q?: string } = {}
+  ): Promise<{ ids: string[]; nextPageToken?: string }> {
     const res = await this.call('messages.list', () =>
       this.g.users.messages.list({
         userId: 'me',
-        maxResults: 100,
+        maxResults: opts.maxResults ?? 100,
         includeSpamTrash: true,
+        labelIds: opts.labelIds,
+        q: opts.q,
         pageToken
       })
     )
@@ -106,6 +111,30 @@ export class GmailApi {
       ids: (res.messages ?? []).flatMap((m) => (m.id ? [m.id] : [])),
       nextPageToken: res.nextPageToken ?? undefined
     }
+  }
+
+  /** Every message id carrying a label (or every id at all), across pages */
+  async listAllMessageIds(labelIds?: string[]): Promise<Set<string>> {
+    const ids = new Set<string>()
+    let pageToken: string | undefined
+    do {
+      const page = await this.listMessageIds(pageToken, { labelIds, maxResults: 500 })
+      for (const id of page.ids) ids.add(id)
+      pageToken = page.nextPageToken
+    } while (pageToken)
+    return ids
+  }
+
+  /**
+   * Find the Gmail id of a message by its Message-ID header. Used to check
+   * whether a send that was mid-flight when the app died actually went out.
+   */
+  async findByMessageId(messageIdHdr: string): Promise<string | null> {
+    const page = await this.listMessageIds(undefined, {
+      q: `rfc822msgid:${messageIdHdr}`,
+      maxResults: 1
+    })
+    return page.ids[0] ?? null
   }
 
   async getMessage(id: string): Promise<ParsedMessage | null> {
@@ -128,19 +157,17 @@ export class GmailApi {
     const res = await this.call('history.list', () =>
       this.g.users.history.list({ userId: 'me', startHistoryId, maxResults: 100, pageToken })
     )
-    const history = (res.history ?? []).map(
-      (h): HistoryEntry => ({
-        messagesAdded: (h.messagesAdded ?? []).flatMap((m) =>
-          m.message?.id ? [{ id: m.message.id }] : []
-        ),
-        messagesDeleted: (h.messagesDeleted ?? []).flatMap((m) =>
-          m.message?.id ? [{ id: m.message.id }] : []
-        ),
-        labelChanges: [...(h.labelsAdded ?? []), ...(h.labelsRemoved ?? [])].flatMap((l) =>
-          l.message?.id ? [{ id: l.message.id, labelIds: l.message.labelIds ?? [] }] : []
-        )
-      })
-    )
+    const history = (res.history ?? []).map((h): HistoryEntry => ({
+      messagesAdded: (h.messagesAdded ?? []).flatMap((m) =>
+        m.message?.id ? [{ id: m.message.id }] : []
+      ),
+      messagesDeleted: (h.messagesDeleted ?? []).flatMap((m) =>
+        m.message?.id ? [{ id: m.message.id }] : []
+      ),
+      labelChanges: [...(h.labelsAdded ?? []), ...(h.labelsRemoved ?? [])].flatMap((l) =>
+        l.message?.id ? [{ id: l.message.id, labelIds: l.message.labelIds ?? [] }] : []
+      )
+    }))
     return {
       history,
       historyId: res.historyId ?? undefined,
@@ -159,14 +186,80 @@ export class GmailApi {
   }
 
   /** Send a raw RFC 822 message; threadId appends it to an existing conversation */
-  async send(raw: Buffer, threadId?: string): Promise<string> {
+  async send(raw: Buffer, threadId?: string): Promise<{ id: string; threadId: string }> {
     const res = await this.call('messages.send', () =>
       this.g.users.messages.send({
         userId: 'me',
         requestBody: { raw: raw.toString('base64url'), threadId }
       })
     )
-    return res.id ?? ''
+    return { id: res.id ?? '', threadId: res.threadId ?? '' }
+  }
+
+  // ---- drafts (Gmail's Drafts folder mirrors our local drafts) ----
+
+  /** Create a Gmail draft from raw RFC 822; returns the draft id and its message id */
+  async createDraft(
+    raw: Buffer,
+    threadId?: string
+  ): Promise<{ draftId: string; messageId: string; threadId: string }> {
+    const res = await this.call('drafts.create', () =>
+      this.g.users.drafts.create({
+        userId: 'me',
+        requestBody: { message: { raw: raw.toString('base64url'), threadId } }
+      })
+    )
+    return {
+      draftId: res.id ?? '',
+      messageId: res.message?.id ?? '',
+      threadId: res.message?.threadId ?? ''
+    }
+  }
+
+  /** Replace a draft's content. Gmail assigns the draft's message a new id each time. */
+  async updateDraft(
+    draftId: string,
+    raw: Buffer,
+    threadId?: string
+  ): Promise<{ draftId: string; messageId: string; threadId: string }> {
+    const res = await this.call('drafts.update', () =>
+      this.g.users.drafts.update({
+        userId: 'me',
+        id: draftId,
+        requestBody: { message: { raw: raw.toString('base64url'), threadId } }
+      })
+    )
+    return {
+      draftId: res.id ?? draftId,
+      messageId: res.message?.id ?? '',
+      threadId: res.message?.threadId ?? ''
+    }
+  }
+
+  /** Delete a draft; a 404 means it is already gone, which is the goal */
+  async deleteDraft(draftId: string): Promise<void> {
+    try {
+      await this.call('drafts.delete', () =>
+        this.g.users.drafts.delete({ userId: 'me', id: draftId })
+      )
+    } catch (err) {
+      if (err instanceof GmailError && err.status === 404) return
+      throw err
+    }
+  }
+
+  /** The draft id wrapping a given draft message id (synced drafts don't carry it) */
+  async findDraftIdForMessage(messageId: string): Promise<string | null> {
+    let pageToken: string | undefined
+    do {
+      const res = await this.call('drafts.list', () =>
+        this.g.users.drafts.list({ userId: 'me', maxResults: 500, pageToken })
+      )
+      const hit = (res.drafts ?? []).find((d) => d.message?.id === messageId)
+      if (hit?.id) return hit.id
+      pageToken = res.nextPageToken ?? undefined
+    } while (pageToken)
+    return null
   }
 
   async trash(id: string): Promise<void> {
@@ -204,7 +297,10 @@ export function parseAddressList(input: string | undefined): Mailbox[] {
     if (!trimmed) continue
     const angle = trimmed.match(/^(.*?)<([^<>]+)>\s*$/)
     if (angle) {
-      const name = angle[1].trim().replace(/^"(.*)"$/, '$1').trim()
+      const name = angle[1]
+        .trim()
+        .replace(/^"(.*)"$/, '$1')
+        .trim()
       const address = angle[2].trim().toLowerCase()
       if (address.includes('@')) out.push(name ? { name, address } : { address })
     } else if (trimmed.includes('@')) {
@@ -297,9 +393,7 @@ export function parseGmailMessage(res: gmail_v1.Schema$Message): ParsedMessage {
   const { text, html, hasCalendar } = extractBodies(res.payload ?? undefined)
   const from = parseAddressList(headers.get('from'))[0] ?? { address: '' }
   const replyTo = parseAddressList(headers.get('reply-to'))[0] ?? null
-  const references = (headers.get('references') ?? '')
-    .split(/\s+/)
-    .filter((r) => r.startsWith('<'))
+  const references = (headers.get('references') ?? '').split(/\s+/).filter((r) => r.startsWith('<'))
   const state = labelsToState(labels)
 
   return {

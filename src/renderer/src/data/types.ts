@@ -61,6 +61,19 @@ export interface Message {
   /** Spark-style smart-inbox classification */
   category: Category
   important: boolean
+  /** Lifecycle: synced from Gmail, or a local draft / outgoing message in flight */
+  state: MessageState
+  /** Earliest send time (ISO) for a queued message: undo window or scheduled send */
+  sendAfter?: string
+  /** Last send error, for queued (retrying) and failed messages */
+  sendError?: string
+}
+
+export type MessageState = 'synced' | 'draft' | 'queued' | 'sending' | 'sent' | 'failed'
+
+/** A queued message whose send time is far enough out to count as "scheduled" rather than an undo window */
+export function isScheduled(m: Message): boolean {
+  return m.state === 'queued' && !!m.sendAfter && Date.parse(m.sendAfter) - Date.now() > 30_000
 }
 
 /**
