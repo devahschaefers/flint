@@ -110,6 +110,7 @@ const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
       DROP INDEX IF EXISTS idx_messages_list;
       DROP INDEX IF EXISTS idx_messages_date;
       DROP INDEX IF EXISTS idx_messages_thread;
+      CREATE INDEX idx_v1_hdr ON messages_v1(account_id, message_id_hdr, id);
     `)
     db.exec(SCHEMA)
     // Synced Gmail mail can carry duplicate Message-ID headers (the same
