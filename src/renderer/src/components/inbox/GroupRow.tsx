@@ -75,7 +75,9 @@ export default function GroupRow({ category, threads, onOpen }: GroupRowProps): 
           <Check size={11} />
         </span>
         {hasUnread && <span className="h-2 w-2 rounded-full bg-blue-3" />}
-        <span className={cn('flex h-[26px] w-[26px] items-center justify-center rounded-full', chip)}>
+        <span
+          className={cn('flex h-[26px] w-[26px] items-center justify-center rounded-full', chip)}
+        >
           <Icon size={14} strokeWidth={2} className={icon} />
         </span>
       </span>
@@ -91,7 +93,10 @@ export default function GroupRow({ category, threads, onOpen }: GroupRowProps): 
         {chips.map(({ mailbox, count, unread }) => {
           const identity = resolveMailbox(mailbox, contacts)
           return (
-            <span key={mailbox.address.toLowerCase()} className="flex shrink-0 items-center gap-1.5">
+            <span
+              key={mailbox.address.toLowerCase()}
+              className="flex shrink-0 items-center gap-1.5"
+            >
               {unread && <span className="h-[6px] w-[6px] rounded-full bg-blue-3" />}
               <span
                 className="flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-semibold text-white ring-1 ring-elevation-1"

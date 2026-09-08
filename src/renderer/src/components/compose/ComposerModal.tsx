@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { useEditorState } from '@tiptap/react'
 import { ChevronDown, X } from 'lucide-react'
 import { formatAddressList, parseAddressList } from '../../lib/address'
 import { resolveMailbox } from '../../lib/identity'
+import { useLatest } from '../../lib/useLatest'
 import { useAppStore } from '../../store'
-import { paragraphsToHtml, RichEditorContent, useComposeEditor } from './RichEditor'
+import { paragraphsToHtml, useComposeEditor } from './composeEditor'
+import { RichEditorContent } from './RichEditor'
 import Toolbar from './Toolbar'
 import {
   DropdownMenu,
@@ -17,6 +19,42 @@ import {
 /** Global compose window: opened from HeaderControls (pen) or a draft row. Store-driven. */
 export default function ComposerModal(): React.JSX.Element | null {
   const composer = useAppStore((s) => s.composer)
+  if (!composer.open) return null
+  // The panel holds the fields and the editor and is keyed by the draft, so each
+  // open (or switch to another draft) mounts fresh: prefilled from that draft, or
+  // empty for a new message. Closing unmounts it, so nothing carries over.
+  return <ComposerPanel key={composer.draftId ?? 'new'} draftId={composer.draftId} />
+}
+
+interface InitialFields {
+  to: string
+  subject: string
+  /** Draft body to load into the editor; null for a new, empty message */
+  html: string | null
+  accountId: string
+}
+
+/** Fields for a freshly opened composer, read once from the store at mount */
+function initialFields(draftId: string | null): InitialFields {
+  const { messages, activeAccountId, accounts } = useAppStore.getState()
+  const editing = draftId ? messages.find((m) => m.messageId === draftId) : undefined
+  if (editing) {
+    return {
+      to: formatAddressList(editing.to),
+      subject: editing.subject,
+      html: editing.bodyHtml ?? paragraphsToHtml(editing.body),
+      accountId: editing.accountId
+    }
+  }
+  return {
+    to: '',
+    subject: '',
+    html: null,
+    accountId: activeAccountId !== 'all' ? activeAccountId : (accounts[0]?.id ?? '')
+  }
+}
+
+function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Element | null {
   const sendMessage = useAppStore((s) => s.sendMessage)
   const saveDraft = useAppStore((s) => s.saveDraft)
   const deleteDraft = useAppStore((s) => s.deleteDraft)
@@ -24,12 +62,13 @@ export default function ComposerModal(): React.JSX.Element | null {
   const contacts = useAppStore((s) => s.contacts)
   const accounts = useAppStore((s) => s.accounts)
   const draft = useAppStore((s) =>
-    s.composer.draftId ? s.messages.find((m) => m.messageId === s.composer.draftId) : undefined
+    draftId ? s.messages.find((m) => m.messageId === draftId) : undefined
   )
 
-  const [to, setTo] = useState('')
-  const [subject, setSubject] = useState('')
-  const [accountId, setAccountId] = useState(accounts[0]?.id ?? '')
+  const [initial] = useState(() => initialFields(draftId))
+  const [to, setTo] = useState(initial.to)
+  const [subject, setSubject] = useState(initial.subject)
+  const [accountId, setAccountId] = useState(initial.accountId)
 
   const editor = useComposeEditor({
     placeholder: 'Write something...',
@@ -37,25 +76,10 @@ export default function ComposerModal(): React.JSX.Element | null {
   })
   const bodyText = useEditorState({ editor, selector: (ctx) => ctx.editor?.getText() ?? '' })
 
-  // Prefill from the draft being edited, or reset for a fresh message, each time it opens
+  // The editor is outside React: load the draft body once the instance exists
   useEffect(() => {
-    if (!composer.open || !editor) return
-    const { messages, activeAccountId, accounts } = useAppStore.getState()
-    const editing = composer.draftId
-      ? messages.find((m) => m.messageId === composer.draftId)
-      : undefined
-    if (editing) {
-      setTo(formatAddressList(editing.to))
-      setSubject(editing.subject)
-      editor.commands.setContent(editing.bodyHtml ?? paragraphsToHtml(editing.body))
-      setAccountId(editing.accountId)
-    } else {
-      setTo('')
-      setSubject('')
-      editor.commands.clearContent()
-      setAccountId(activeAccountId !== 'all' ? activeAccountId : (accounts[0]?.id ?? ''))
-    }
-  }, [composer.open, composer.draftId, editor])
+    if (editor && initial.html !== null) editor.commands.setContent(initial.html)
+  }, [editor, initial.html])
 
   // Live parse of the raw RFC 5322 To text — resolved chips preview the recipients
   const recipients = useMemo(() => parseAddressList(to), [to])
@@ -72,21 +96,20 @@ export default function ComposerModal(): React.JSX.Element | null {
 
   const handleClose = (): void => {
     if (hasContent) {
-      saveDraft({ to, subject, ...richInput(), accountId, draftId: composer.draftId })
+      saveDraft({ to, subject, ...richInput(), accountId, draftId })
     } else {
       // Closing a draft after clearing every field deletes it, like real clients
-      if (composer.draftId) deleteDraft(composer.draftId)
+      if (draftId) deleteDraft(draftId)
       closeCompose()
     }
   }
-  const handleCloseRef = useRef(handleClose)
-  handleCloseRef.current = handleClose
+  // The window listener below is attached once; the ref keeps it on the latest closure
+  const handleCloseRef = useLatest(handleClose)
 
   // Escape saves-or-closes exactly like the X button / backdrop. App.tsx's Escape
   // chain defers to this listener while the composer is open (and preventDefaults
   // when a higher layer like search consumed the key, which skips this handler).
   useEffect(() => {
-    if (!composer.open) return undefined
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.defaultPrevented) return
       e.preventDefault()
@@ -94,16 +117,14 @@ export default function ComposerModal(): React.JSX.Element | null {
     }
     window.addEventListener('keydown', onKey)
     return (): void => window.removeEventListener('keydown', onKey)
-  }, [composer.open])
+  }, [handleCloseRef])
 
   const handleSend = (): void => {
     if (!canSend) return
-    sendMessage({ to, subject, ...richInput(), accountId, draftId: composer.draftId })
+    sendMessage({ to, subject, ...richInput(), accountId, draftId })
   }
-  const handleSendRef = useRef(handleSend)
-  handleSendRef.current = handleSend
-
-  if (!composer.open) return null
+  // Same for the editor's ⌘↵ keymap, which TipTap captures at editor creation
+  const handleSendRef = useLatest(handleSend)
 
   const fromAccount = accounts.find((a) => a.id === accountId) ?? accounts[0]
   // No connected account: nothing to compose from
@@ -232,9 +253,7 @@ export default function ComposerModal(): React.JSX.Element | null {
             Send
           </button>
           <button
-            onClick={() =>
-              saveDraft({ to, subject, ...richInput(), accountId, draftId: composer.draftId })
-            }
+            onClick={() => saveDraft({ to, subject, ...richInput(), accountId, draftId })}
             disabled={!hasContent}
             className="text-[13px] text-text-secondary transition-colors duration-150 hover:text-ink disabled:opacity-40 disabled:hover:text-text-secondary"
           >

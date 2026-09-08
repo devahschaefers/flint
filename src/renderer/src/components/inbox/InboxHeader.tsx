@@ -18,7 +18,8 @@ export default function InboxHeader({ title = 'Inbox' }: InboxHeaderProps): Reac
   const accounts = useAppStore((s) => s.accounts)
 
   const activeAccount = accounts.find((a) => a.id === activeAccountId)
-  const subtitle = activeAccountId === 'all' ? 'Focused List' : (activeAccount?.name ?? 'Focused List')
+  const subtitle =
+    activeAccountId === 'all' ? 'Focused List' : (activeAccount?.name ?? 'Focused List')
 
   return (
     <div className="drag-region flex items-start justify-between px-[30px] pt-[40px] pb-2">
@@ -32,7 +33,9 @@ export default function InboxHeader({ title = 'Inbox' }: InboxHeaderProps): Reac
             <DropdownMenuItem onSelect={() => setAccount('all')}>
               <span className="h-3.5 w-3.5 shrink-0" />
               <span className="flex-1">All Accounts</span>
-              {activeAccountId === 'all' && <Check size={14} className="shrink-0 text-text-bright" />}
+              {activeAccountId === 'all' && (
+                <Check size={14} className="shrink-0 text-text-bright" />
+              )}
             </DropdownMenuItem>
             {accounts.map((account) => (
               <DropdownMenuItem key={account.id} onSelect={() => setAccount(account.id)}>

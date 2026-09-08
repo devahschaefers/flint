@@ -18,6 +18,17 @@ export default defineConfig(
     }
   },
   {
+    // Plain CommonJS Node scripts (the postinstall self-heal). The toolkit config
+    // applies the TypeScript rule set to every file; require() imports and
+    // annotation-only rules have no meaning in untyped JS, so switch them off here.
+    files: ['scripts/**/*.js'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: {
+      '@typescript-eslint/no-require-imports': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off'
+    }
+  },
+  {
     files: ['**/*.{ts,tsx}'],
     plugins: {
       'react-hooks': eslintPluginReactHooks,

@@ -14,11 +14,16 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   the v1→v2 table rebuild was ~15 s on a 1 GB database, and v2→v3 adds the FTS build
   (~1.5 s) plus a one-off `VACUUM` of the whole file. A splash/progress window, or running
   migrations off the main thread, would hide it. `src/main/db.ts`.
+- **Medium** — One bad row empties the whole mailbox: `init` awaits `reloadMail`, and if
+  `wireToMessage` throws on any message (seen 2026-09-08 when the storage-layer branch's
+  compactor left zstd blob bodies in the shared `mail.db`, which this main returns as
+  `Uint8Array` so `toParagraphs` calls `.split` on a buffer) the store stays empty and
+  `subscribeOnce` is never reached, so no later `onMailChanged` recovers it. Make the mapping
+  per-row tolerant and subscribe before the first load. `src/renderer/src/store.ts`,
+  `src/renderer/src/lib/wire.ts`. Any build behind schema v3 shows an empty mailbox against the
+  compacted database for this reason.
 - **Medium** — Attachments are skipped entirely; a message with only an attachment looks
   empty. Needs part metadata + on-demand download. `src/main/google/gmail.ts`.
-- **Medium** — `pnpm lint` fails on main with 19 pre-existing errors: `require()` in
-  `scripts/ensure-electron.js`, and react-hooks rules in `ComposerModal.tsx`,
-  `ReplyComposer.tsx`, `RichEditor.tsx`, `SearchOverlay.tsx`.
 - **Low** — Full resync after history expiry fetches at most 2,000 newest missing messages
   (`RESYNC_NEW_CAP`); a longer gap leaves holes until the next pass. It also still fetches
   them with `format=full` rather than metadata-first like backfill. `src/main/sync.ts`.
@@ -88,6 +93,11 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   payloads and senders unvalidated.~~ `b0611e6`
 - ~~**Medium** — Remote images loaded on open (tracking pixels).~~ Blocked by default with a
   per-message Load images control. `8a0571a`
+- ~~**Medium** — `pnpm lint` fails on main with 19 pre-existing errors: `require()` in
+  `scripts/ensure-electron.js`, and react-hooks rules in `ComposerModal.tsx`,
+  `ReplyComposer.tsx`, `RichEditor.tsx`, `SearchOverlay.tsx`.~~ Scripts get plain JS
+  rules; render-time ref writes moved to `useLatest`; search/composer panels mount fresh
+  on open instead of resetting state in effects. `decb6c0`
 - ~~**Medium** — No test coverage anywhere.~~ vitest suite over migration, upserts, outbox
   state machine, and history-expired reconcile. `832ca3b` `7944f99` `eb1de28`
 - ~~**Medium** — Migration dedupe subquery was quadratic (minutes on a 1 GB mailbox).~~

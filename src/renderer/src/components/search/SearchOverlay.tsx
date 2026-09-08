@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { motion } from 'motion/react'
 import { Search, X } from 'lucide-react'
 import type { Mailbox } from '../../data/types'
@@ -10,6 +10,11 @@ import ThreadRow from '../inbox/ThreadRow'
 /** Global search across all mail (every folder, archive included). Store-driven. */
 export default function SearchOverlay(): React.JSX.Element | null {
   const searchOpen = useAppStore((s) => s.searchOpen)
+  // The panel owns the query and unmounts on close, so every open starts empty
+  return searchOpen ? <SearchPanel /> : null
+}
+
+function SearchPanel(): React.JSX.Element {
   const setSearchOpen = useAppStore((s) => s.setSearchOpen)
   const openThread = useAppStore((s) => s.openThread)
   const messages = useAppStore((s) => s.messages)
@@ -17,12 +22,6 @@ export default function SearchOverlay(): React.JSX.Element | null {
   const activeAccountId = useAppStore((s) => s.activeAccountId)
 
   const [query, setQuery] = useState('')
-
-  // Fresh query each time the overlay opens
-  useEffect(() => {
-    if (searchOpen) setQuery('')
-  }, [searchOpen])
-
   const trimmed = query.trim()
 
   // Match subject, body, and every address/name a message carries — including the
@@ -52,8 +51,6 @@ export default function SearchOverlay(): React.JSX.Element | null {
       .filter((t) => rootIds.has(t.id))
       .slice(0, 50)
   }, [messages, contacts, activeAccountId, trimmed])
-
-  if (!searchOpen) return null
 
   return (
     // Above the composer (z-[60]) so Cmd+K works while composing; menus are z-[80]

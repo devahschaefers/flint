@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useEditorState } from '@tiptap/react'
 import { Maximize2, X } from 'lucide-react'
+import { useLatest } from '../../lib/useLatest'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store'
-import { useComposeEditor, RichEditorContent } from './RichEditor'
+import { useComposeEditor } from './composeEditor'
+import { RichEditorContent } from './RichEditor'
 import Toolbar from './Toolbar'
 
 type Mode = 'collapsed' | 'open' | 'full'
@@ -37,8 +39,9 @@ export default function ReplyComposer({
   const toastTimer = useRef<number | undefined>(undefined)
   const lastSent = useRef<{ messageId: string; html: string } | null>(null)
 
-  const modeRef = useRef(mode)
-  modeRef.current = mode
+  // Read by the once-attached Escape listener below, which must see the current mode
+  const modeRef = useLatest(mode)
+  const composerShown = mode !== 'collapsed'
 
   const editor = useComposeEditor({ placeholder: replyLabel, onSend: () => sendRef.current() })
 
@@ -55,10 +58,10 @@ export default function ReplyComposer({
     toastTimer.current = window.setTimeout(() => setToast(null), TOAST_MS)
   }
 
-  const closeComposer = (): void => {
+  const closeComposer = useCallback((): void => {
     setMode('collapsed')
     setCustomHeight(null)
-  }
+  }, [])
 
   const send = (): void => {
     if (!editor || !editor.getText().trim()) return
@@ -77,8 +80,8 @@ export default function ReplyComposer({
       setMode('open')
     })
   }
-  const sendRef = useRef(send)
-  sendRef.current = send
+  // The editor's ⌘↵ keymap is captured once by TipTap; the ref keeps it on the latest send
+  const sendRef = useLatest(send)
 
   // Focus when opening; keep focus through fullscreen toggles
   useEffect(() => {
@@ -93,7 +96,7 @@ export default function ReplyComposer({
   // Escape steps down: slash menu (handled in the editor) → fullscreen → collapse.
   // Capture-phase so App.tsx's window listener never also navigates back.
   useEffect(() => {
-    if (mode === 'collapsed') return undefined
+    if (!composerShown) return undefined
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || slashOpenRef.current) return
       e.preventDefault()
@@ -103,7 +106,7 @@ export default function ReplyComposer({
     }
     window.addEventListener('keydown', onKey, { capture: true })
     return (): void => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [mode !== 'collapsed'])
+  }, [composerShown, closeComposer, modeRef])
 
   const full = mode === 'full'
 
