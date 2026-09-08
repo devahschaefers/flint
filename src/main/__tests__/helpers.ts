@@ -32,8 +32,9 @@ export function record(
 
 /** Same shape minus accountId (what GmailApi.getMessage hands back) */
 export function parsed(over: Partial<ParsedMessage> & { gmailId: string }): ParsedMessage {
-  const { accountId: _ignored, ...rest } = record({ accountId: 'unused', ...over })
-  return rest
+  const full: Partial<db.MsgRecord> = record({ accountId: 'unused', ...over })
+  delete full.accountId
+  return full as ParsedMessage
 }
 
 export function createAccount(id = 'acct', email = 'me@example.com'): void {
