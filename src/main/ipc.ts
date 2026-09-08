@@ -1,58 +1,112 @@
-import { ipcMain } from 'electron'
+import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import * as db from './db'
 import { outbox } from './outbox'
 import { syncEngine } from './sync'
-import type { GoogleConfig, LocalMessageInput, MailAction } from '../preload/index.d'
+import type { GoogleConfig } from '../preload/index.d'
+import {
+  asBoolean,
+  asFiniteNumber,
+  asGoogleConfig,
+  asIdListOrNull,
+  asLocalMessageInput,
+  asMailAction,
+  asObject,
+  asOptionalBoolean,
+  asString,
+  asStringArray,
+  assertTrustedSender
+} from './validate'
+
+/**
+ * `ipcMain.handle` with the sender check applied before the handler sees the
+ * payload. Handlers receive the raw argument as `unknown` and must narrow it
+ * with the guards in ./validate; a thrown Error rejects the renderer's promise.
+ */
+function handle(
+  channel: string,
+  fn: (payload: unknown, event: IpcMainInvokeEvent) => unknown
+): void {
+  ipcMain.handle(channel, (event, payload: unknown) => {
+    assertTrustedSender(event)
+    return fn(payload, event)
+  })
+}
 
 export function registerIpc(): void {
-  ipcMain.handle('config:google:get', (): GoogleConfig => ({
+  handle('config:google:get', (): GoogleConfig => ({
     clientId: db.getConfig('google_client_id') ?? '',
     clientSecret: db.getConfig('google_client_secret') ?? ''
   }))
-  ipcMain.handle('config:google:set', (_e, cfg: GoogleConfig) => {
+  handle('config:google:set', (raw) => {
+    const cfg = asGoogleConfig(raw)
     db.setConfig('google_client_id', cfg.clientId.trim())
     db.setConfig('google_client_secret', cfg.clientSecret.trim())
   })
 
-  ipcMain.handle('accounts:list', () => db.listAccounts())
-  ipcMain.handle('accounts:add', () => syncEngine.addAccount())
-  ipcMain.handle('accounts:remove', (_e, id: string) => syncEngine.removeAccount(id))
+  handle('accounts:list', () => db.listAccounts())
+  handle('accounts:add', () => syncEngine.addAccount())
+  handle('accounts:remove', (raw) => syncEngine.removeAccount(asString(raw, 'id')))
 
-  ipcMain.handle('mail:window', (_e, perAccount: number) => db.queryWindow(perAccount))
-  ipcMain.handle('mail:thread', (_e, p: { accountId: string; threadId: string }) =>
-    db.queryThread(p.accountId, p.threadId)
-  )
-  ipcMain.handle(
-    'mail:action',
-    (_e, p: { accountId: string; gmailIds: string[]; action: MailAction; value?: boolean }) =>
-      outbox.applyAction(p.accountId, p.gmailIds, p.action, p.value)
-  )
+  handle('mail:window', (raw) => {
+    const perAccount = asFiniteNumber(raw, 'perAccount')
+    if (perAccount < 0) throw new Error('perAccount must be non-negative')
+    return db.queryWindow(perAccount)
+  })
+  handle('mail:thread', (raw) => {
+    const p = asObject(raw, 'params')
+    return db.queryThread(asString(p.accountId, 'accountId'), asString(p.threadId, 'threadId'))
+  })
+  handle('mail:action', (raw) => {
+    const p = asObject(raw, 'params')
+    return outbox.applyAction(
+      asString(p.accountId, 'accountId'),
+      asStringArray(p.gmailIds, 'gmailIds'),
+      asMailAction(p.action, 'action'),
+      asOptionalBoolean(p.value, 'value')
+    )
+  })
 
-  ipcMain.handle('mail:draft:save', (_e, input: LocalMessageInput) => outbox.saveDraft(input))
-  ipcMain.handle('mail:local:delete', (_e, p: { accountId: string; messageIdHdr: string }) =>
-    outbox.deleteLocal(p.accountId, p.messageIdHdr)
-  )
-  ipcMain.handle('mail:send:queue', (_e, p: { input: LocalMessageInput; sendAfterMs: number }) =>
-    outbox.queueSend(p.input, p.sendAfterMs)
-  )
-  ipcMain.handle(
-    'mail:send:cancel',
-    (_e, p: { accountId: string; messageIdHdr: string; asDraft: boolean }) =>
-      outbox.cancelSend(p.accountId, p.messageIdHdr, p.asDraft)
-  )
-  ipcMain.handle('mail:send:retry', (_e, p: { accountId: string; messageIdHdr: string }) =>
-    outbox.retrySend(p.accountId, p.messageIdHdr)
-  )
+  handle('mail:draft:save', (raw) => outbox.saveDraft(asLocalMessageInput(raw)))
+  handle('mail:local:delete', (raw) => {
+    const p = asObject(raw, 'params')
+    return outbox.deleteLocal(
+      asString(p.accountId, 'accountId'),
+      asString(p.messageIdHdr, 'messageIdHdr')
+    )
+  })
+  handle('mail:send:queue', (raw) => {
+    const p = asObject(raw, 'params')
+    return outbox.queueSend(
+      asLocalMessageInput(p.input, 'input'),
+      asFiniteNumber(p.sendAfterMs, 'sendAfterMs')
+    )
+  })
+  handle('mail:send:cancel', (raw) => {
+    const p = asObject(raw, 'params')
+    return outbox.cancelSend(
+      asString(p.accountId, 'accountId'),
+      asString(p.messageIdHdr, 'messageIdHdr'),
+      asBoolean(p.asDraft, 'asDraft')
+    )
+  })
+  handle('mail:send:retry', (raw) => {
+    const p = asObject(raw, 'params')
+    return outbox.retrySend(
+      asString(p.accountId, 'accountId'),
+      asString(p.messageIdHdr, 'messageIdHdr')
+    )
+  })
 
-  ipcMain.handle('outbox:list', () => outbox.listTroubled())
-  ipcMain.handle('outbox:retry', (_e, ids: number[] | null) => outbox.retry(ids))
-  ipcMain.handle('outbox:discard', (_e, ids: number[] | null) => outbox.discard(ids))
+  handle('outbox:list', () => outbox.listTroubled())
+  handle('outbox:retry', (raw) => outbox.retry(asIdListOrNull(raw, 'ids')))
+  handle('outbox:discard', (raw) => outbox.discard(asIdListOrNull(raw, 'ids')))
 
-  ipcMain.handle('settings:get', () => db.getSettings())
-  ipcMain.handle('settings:set', (_e, p: { key: string; value: string }) =>
-    db.setSetting(p.key, p.value)
-  )
+  handle('settings:get', () => db.getSettings())
+  handle('settings:set', (raw) => {
+    const p = asObject(raw, 'params')
+    return db.setSetting(asString(p.key, 'key'), asString(p.value, 'value'))
+  })
 
-  ipcMain.handle('sync:refresh', () => syncEngine.deltaAll())
-  ipcMain.handle('sync:status', () => syncEngine.status())
+  handle('sync:refresh', () => syncEngine.deltaAll())
+  handle('sync:status', () => syncEngine.status())
 }

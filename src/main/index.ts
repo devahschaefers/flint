@@ -11,6 +11,28 @@ if (is.dev) {
   app.commandLine.appendSwitch('remote-debugging-port', process.env['DEBUG_PORT'] ?? '9223')
 }
 
+/**
+ * Only web links and mailto: reach the OS. Mail HTML is attacker-controlled
+ * and `shell.openExternal` will happily launch `file:`, `smb:`, or any
+ * registered custom scheme, so anything else is dropped and logged.
+ */
+const EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:'])
+
+function openExternalSafely(url: string): void {
+  let protocol: string
+  try {
+    protocol = new URL(url).protocol
+  } catch {
+    console.warn(`[nav] dropped unparseable URL: ${url}`)
+    return
+  }
+  if (!EXTERNAL_PROTOCOLS.has(protocol)) {
+    console.warn(`[nav] dropped ${protocol} URL: ${url}`)
+    return
+  }
+  void shell.openExternal(url).catch((err) => console.warn(`[nav] openExternal failed:`, err))
+}
+
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -28,7 +50,11 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      // The renderer only ever talks to main through the contextBridge API, so
+      // it runs in the Chromium sandbox with no Node access at all.
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false
     }
   })
 
@@ -37,7 +63,7 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
-    shell.openExternal(details.url)
+    openExternalSafely(details.url)
     return { action: 'deny' }
   })
 
@@ -47,7 +73,7 @@ function createWindow(): void {
     const devUrl = process.env['ELECTRON_RENDERER_URL']
     if (is.dev && devUrl && url.startsWith(devUrl)) return
     event.preventDefault()
-    void shell.openExternal(url)
+    openExternalSafely(url)
   })
 
   // HMR for renderer base on electron-vite cli.
