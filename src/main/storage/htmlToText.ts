@@ -117,13 +117,14 @@ export function htmlToText(html: string): string {
   s = s.replace(CELL_BREAK, ' ')
   s = s.replace(TAGS, '')
   s = decodeEntities(s)
-  // Collapse horizontal whitespace, trim lines, cap blank runs at one blank line
+  // Collapse horizontal whitespace, trim lines, one newline between blocks
+  // (an opening and a closing block tag both produce one, so runs are normal)
   s = s.replace(/[ \t\r\f\v\u00a0]+/g, ' ')
   s = s
     .split('\n')
     .map((line) => line.trim())
     .join('\n')
-  s = s.replace(/\n{3,}/g, '\n\n')
+  s = s.replace(/\n{2,}/g, '\n')
   return s.trim()
 }
 

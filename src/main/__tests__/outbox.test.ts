@@ -568,6 +568,55 @@ describe('label actions', () => {
     outbox.applyAction(A, [], 'archive')
     expect(ops()).toEqual([])
   })
+
+  describe('messages Gmail no longer has (404)', () => {
+    it('retries a failed batch per message, treats a missing one as done, and keeps the lane moving', async () => {
+      api.script('batchModify', async (ids: string[]) => {
+        if (ids.length > 1 || ids[0] === 'g2')
+          throw new GmailError(404, 'Requested entity was not found')
+      })
+      outbox.applyAction(A, ['g1', 'g2'], 'archive')
+      outbox.applyAction(A, ['g1'], 'seen', true)
+      await drain()
+
+      expect(api.calls.map((c) => c.args)).toEqual([
+        [['g1', 'g2'], [], ['INBOX']],
+        [['g1'], [], ['INBOX']],
+        [['g2'], [], ['INBOX']],
+        [['g1'], [], ['UNREAD']]
+      ])
+      expect(ops()).toEqual([])
+      expect(outbox.listTroubled()).toEqual([])
+    })
+
+    it('counts a single missing message as done without a retry', async () => {
+      api.script('batchModify', rejectWith(404))
+      outbox.applyAction(A, ['g1'], 'flagged', true)
+      await drain()
+      expect(api.calls).toHaveLength(1)
+      expect(ops()).toEqual([])
+    })
+
+    it('still parks the op when the per-message retry fails for another reason', async () => {
+      api.script('batchModify', async (ids: string[]) => {
+        if (ids.length > 1) throw new GmailError(404, 'not found')
+        if (ids[0] === 'g1') throw new GmailError(403, 'forbidden')
+      })
+      outbox.applyAction(A, ['g1', 'g2'], 'archive')
+      await drain()
+      expect(ops().map((o) => [o.state, o.lastError])).toEqual([['failed', 'forbidden']])
+    })
+
+    it('treats trashing a message that is already gone as done', async () => {
+      api.script('trash', async (id: string) => {
+        if (id === 'g2') throw new GmailError(404, 'not found')
+      })
+      outbox.applyAction(A, ['g1', 'g2'], 'trash')
+      await drain()
+      expect(api.called()).toEqual(['trash', 'trash'])
+      expect(ops()).toEqual([])
+    })
+  })
 })
 
 describe('discard', () => {

@@ -254,3 +254,157 @@ describe('delta sync', () => {
     expect(db.getHistoryId(A)).toBe('h-next')
   })
 })
+
+describe('metadata-first backfill', () => {
+  const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+  async function waitForBodyFill(): Promise<void> {
+    for (let i = 0; i < 200 && syncEngine['bodyFilling'].has(A); i++) await sleep(5)
+    expect(syncEngine['bodyFilling'].has(A)).toBe(false)
+  }
+  const DATES: Record<string, number> = { g1: 3000, g2: 2000, g3: 1000 }
+
+  beforeEach(() => {
+    api.script('getMessageMetadata', async (id: string) =>
+      parsed({
+        gmailId: id,
+        threadId: id === 'g3' ? 'T2' : 'T1',
+        subject: `meta ${id}`,
+        bodyText: '',
+        bodyState: 'missing',
+        dateMs: DATES[id] ?? 0
+      })
+    )
+    api.script('getMessage', async (id: string) =>
+      parsed({
+        gmailId: id,
+        threadId: id === 'g3' ? 'T2' : 'T1',
+        subject: `meta ${id}`,
+        bodyText: `full body ${id}`,
+        bodyHtml: `<p>full body ${id}</p>`,
+        dateMs: DATES[id] ?? 0,
+        seen: true
+      })
+    )
+  })
+
+  it('stores metadata for every page first, then fills bodies newest first', async () => {
+    api.script('listMessageIds', async (pageToken?: string) =>
+      pageToken ? { ids: ['g3'] } : { ids: ['g1', 'g2'], nextPageToken: 'p2' }
+    )
+
+    await syncEngine['backfillLoop'](A)
+
+    // Phase 1 done: everything browsable, nothing fetched in full yet
+    expect(db.getBackfillState(A)).toEqual({ pageToken: null, done: true })
+    expect(db.countMessages(A)).toBe(3)
+    expect(db.countMissingBodies(A)).toBe(3)
+    expect(db.getMessageWire(A, 'g2')).toMatchObject({ subject: 'meta g2', bodyText: '' })
+    expect(api.calls.filter((c) => c.method === 'getMessageMetadata')).toHaveLength(3)
+    expect(db.searchMessages('meta')).toHaveLength(3)
+
+    await waitForBodyFill()
+
+    expect(db.countMissingBodies(A)).toBe(0)
+    expect(db.getMessageWire(A, 'g1')).toMatchObject({
+      bodyText: 'full body g1',
+      bodyHtml: '<p>full body g1</p>',
+      seen: true
+    })
+    expect(api.calls.filter((c) => c.method === 'getMessage').map((c) => c.args[0])).toEqual([
+      'g1',
+      'g2',
+      'g3'
+    ])
+    expect(db.searchMessages('"full body"')).toHaveLength(3)
+  })
+
+  it('resumes phase 2 on start when phase 1 is already done', async () => {
+    db.upsertMessages(
+      [parsed({ gmailId: 'g1', bodyState: 'missing', bodyText: '' })].map((p) => ({
+        ...p,
+        accountId: A
+      }))
+    )
+    db.setBackfillState(A, null, true)
+    syncEngine.startBodyFill(A)
+    await waitForBodyFill()
+    expect(db.getMessageWire(A, 'g1')?.bodyText).toBe('full body g1')
+    // nothing to do: does not start
+    syncEngine.startBodyFill(A)
+    expect(syncEngine['bodyFilling'].has(A)).toBe(false)
+  })
+
+  it('drops a metadata-only row whose message Gmail no longer has', async () => {
+    db.upsertMessages([
+      { ...parsed({ gmailId: 'g1', bodyState: 'missing', bodyText: '' }), accountId: A },
+      { ...parsed({ gmailId: 'gone', bodyState: 'missing', bodyText: '' }), accountId: A }
+    ])
+    api.script('getMessage', async (id: string) =>
+      id === 'gone' ? null : parsed({ gmailId: id, bodyText: `full body ${id}` })
+    )
+    syncEngine.startBodyFill(A)
+    await waitForBodyFill()
+    expect(db.hasMessage(A, 'gone')).toBe(false)
+    expect(db.getMessageWire(A, 'g1')?.bodyText).toBe('full body g1')
+    expect(db.countMissingBodies(A)).toBe(0)
+  })
+
+  describe('ensureBodies', () => {
+    beforeEach(() => {
+      db.upsertMessages(
+        ['g1', 'g2', 'g3'].map((id) => ({
+          ...parsed({
+            gmailId: id,
+            threadId: id === 'g3' ? 'T2' : 'T1',
+            bodyState: 'missing',
+            bodyText: ''
+          }),
+          accountId: A
+        }))
+      )
+    })
+
+    it('fetches only the thread’s missing bodies and reports whether it did', async () => {
+      expect(await syncEngine.ensureBodies(A, 'T1')).toBe(true)
+      expect(
+        api.calls
+          .filter((c) => c.method === 'getMessage')
+          .map((c) => c.args[0])
+          .sort()
+      ).toEqual(['g1', 'g2'])
+      expect(
+        db
+          .queryThread(A, 'T1')
+          .map((m) => m.bodyText)
+          .sort()
+      ).toEqual(['full body g1', 'full body g2'])
+      expect(db.getMessageWire(A, 'g3')?.bodyText).toBe('')
+      expect(db.countMissingBodies(A)).toBe(1)
+
+      // second open: nothing left to fetch
+      api.calls.length = 0
+      expect(await syncEngine.ensureBodies(A, 'T1')).toBe(false)
+      expect(api.calls).toEqual([])
+    })
+
+    it('shares one fetch between concurrent opens of the same thread', async () => {
+      const [a, b] = await Promise.all([
+        syncEngine.ensureBodies(A, 'T1'),
+        syncEngine.ensureBodies(A, 'T1')
+      ])
+      expect(a).toBe(true)
+      expect(b).toBe(true)
+      expect(api.calls.filter((c) => c.method === 'getMessage')).toHaveLength(2)
+      expect(syncEngine['threadFetches'].size).toBe(0)
+    })
+
+    it('propagates a fetch failure and leaves the rows missing', async () => {
+      api.script('getMessage', async () => {
+        throw new GmailError(0, 'offline')
+      })
+      await expect(syncEngine.ensureBodies(A, 'T1')).rejects.toMatchObject({ status: 0 })
+      expect(db.countMissingBodies(A)).toBe(3)
+      expect(syncEngine['threadFetches'].size).toBe(0)
+    })
+  })
+})

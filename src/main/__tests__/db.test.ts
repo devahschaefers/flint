@@ -192,6 +192,9 @@ describe('initDb migration v1 -> v2', () => {
     expect(db.listAccounts().map((a) => a.id)).toEqual(['a', 'b'])
     expect(db.getHistoryId('a')).toBe('h1')
     expect(db.listGmailIds('a').sort()).toEqual(['g1', 'g2', 'g3', 'g4'])
+    // v3 on top: the full-text index covers the rows the v2 step copied over
+    expect(db.countIndexed()).toBe(5)
+    expect(db.searchMessages('body')).toHaveLength(5)
   })
 
   it('accepts a v1 database with no messages', () => {
