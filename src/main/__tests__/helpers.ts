@@ -21,6 +21,7 @@ export function record(
     snippet: `snippet ${over.gmailId}`,
     bodyText: `body ${over.gmailId}`,
     bodyHtml: null,
+    bodyState: 'full',
     folder: 'inbox',
     seen: false,
     flagged: false,
@@ -71,6 +72,7 @@ export function fakeGmail(): FakeGmail {
     findByMessageId: async () => null,
     // Read-backs are a no-op unless a test scripts the returned record
     getMessage: async () => null,
+    getMessageMetadata: async () => null,
     listHistory: async () => ({ history: [] }),
     batchModify: async () => undefined,
     send: async () => ({ id: 'gm-sent', threadId: 'th-sent' }),

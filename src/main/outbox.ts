@@ -42,6 +42,11 @@ function isTransient(err: unknown): boolean {
   )
 }
 
+/** Gmail says the message does not exist (any more) */
+function isGone(err: unknown): boolean {
+  return err instanceof GmailError && err.status === 404
+}
+
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -424,30 +429,68 @@ export class Outbox {
     const value = op.payload.value as boolean | null
     switch (op.payload.action as MailAction) {
       case 'seen':
-        await api.batchModify(gmailIds, value ? [] : ['UNREAD'], value ? ['UNREAD'] : [])
+        await this.modify(api, gmailIds, value ? [] : ['UNREAD'], value ? ['UNREAD'] : [])
         break
       case 'flagged':
-        await api.batchModify(gmailIds, value ? ['STARRED'] : [], value ? [] : ['STARRED'])
+        await this.modify(api, gmailIds, value ? ['STARRED'] : [], value ? [] : ['STARRED'])
         break
       case 'archive':
-        await api.batchModify(gmailIds, [], ['INBOX'])
+        await this.modify(api, gmailIds, [], ['INBOX'])
         break
       case 'unarchive':
-        await api.batchModify(gmailIds, ['INBOX'], [])
+        await this.modify(api, gmailIds, ['INBOX'], [])
         break
       case 'trash':
-        for (const id of gmailIds) await api.trash(id)
+        for (const id of gmailIds) {
+          // Already gone is the same as trashed; sync removes the row
+          await api.trash(id).catch((err) => {
+            if (!isGone(err)) throw err
+          })
+        }
         break
       case 'spam':
-        await api.batchModify(gmailIds, ['SPAM'], ['INBOX'])
+        await this.modify(api, gmailIds, ['SPAM'], ['INBOX'])
         break
       case 'inbox':
         // Coming back from trash needs untrash; harmless 4xx if it wasn't there
         for (const id of gmailIds) {
           await api.untrash(id).catch(() => undefined)
         }
-        await api.batchModify(gmailIds, ['INBOX'], ['SPAM'])
+        await this.modify(api, gmailIds, ['INBOX'], ['SPAM'])
         break
+    }
+  }
+
+  /**
+   * batchModify fails wholesale (404) when any id in it no longer exists on
+   * Gmail — another client deleted the message, or spam was purged. The
+   * label change on a message that is gone has nothing left to do, so on a
+   * 404 the batch is retried one message at a time and per-message 404s
+   * count as done. Delta sync removes the local row shortly after.
+   */
+  private async modify(
+    api: GmailApi,
+    gmailIds: string[],
+    add: string[],
+    remove: string[]
+  ): Promise<void> {
+    try {
+      await api.batchModify(gmailIds, add, remove)
+      return
+    } catch (err) {
+      if (!isGone(err)) throw err
+    }
+    if (gmailIds.length === 1) {
+      console.warn(`[outbox] ${gmailIds[0]} no longer exists on Gmail; label change dropped`)
+      return
+    }
+    for (const id of gmailIds) {
+      try {
+        await api.batchModify([id], add, remove)
+      } catch (err) {
+        if (!isGone(err)) throw err
+        console.warn(`[outbox] ${id} no longer exists on Gmail; label change dropped`)
+      }
     }
   }
 

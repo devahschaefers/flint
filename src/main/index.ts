@@ -5,6 +5,7 @@ import icon from '../../resources/icon.png?asset'
 import { initDb } from './db'
 import { registerIpc } from './ipc'
 import { outbox } from './outbox'
+import { compactor } from './storage/compactor'
 import { syncEngine } from './sync'
 
 if (is.dev) {
@@ -103,6 +104,8 @@ app.whenReady().then(() => {
   registerIpc()
   syncEngine.startScheduler()
   outbox.start()
+  // Compresses pre-v3 bodies in the background; a no-op once they are all done
+  compactor.start()
 
   createWindow()
 

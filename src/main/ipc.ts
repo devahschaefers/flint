@@ -52,9 +52,15 @@ export function registerIpc(): void {
     if (perAccount < 0) throw new Error('perAccount must be non-negative')
     return db.queryWindow(perAccount)
   })
-  handle('mail:thread', (raw) => {
+  handle('mail:thread', async (raw) => {
     const p = asObject(raw, 'params')
-    return db.queryThread(asString(p.accountId, 'accountId'), asString(p.threadId, 'threadId'))
+    const accountId = asString(p.accountId, 'accountId')
+    const threadId = asString(p.threadId, 'threadId')
+    // Metadata-only rows get their bodies now; offline, the thread shows what it has
+    await syncEngine
+      .ensureBodies(accountId, threadId)
+      .catch((err) => console.warn('[ipc] could not fetch thread bodies:', err))
+    return db.queryThread(accountId, threadId)
   })
   handle('mail:action', (raw) => {
     const p = asObject(raw, 'params')

@@ -7,6 +7,8 @@
 
 import { gmail, gmail_v1 } from '@googleapis/gmail'
 import type { OAuth2Client } from 'google-auth-library'
+import type { BodyState } from '../db'
+import { bestPlainText } from '../storage/htmlToText'
 import type { Folder } from '../../preload/index.d'
 
 export class GmailError extends Error {
@@ -40,6 +42,8 @@ export interface ParsedMessage {
   snippet: string
   bodyText: string
   bodyHtml: string | null
+  /** 'missing' for a metadata-only fetch (bodies still to come) */
+  bodyState: BodyState
   folder: Folder
   seen: boolean
   flagged: boolean
@@ -145,6 +149,23 @@ export class GmailApi {
       return parseGmailMessage(res)
     } catch (err) {
       // Messages can vanish between list and get (e.g. spam purge)
+      if (err instanceof GmailError && err.status === 404) return null
+      throw err
+    }
+  }
+
+  /**
+   * Headers, labels, snippet and dates only — no body parts. A fraction of
+   * the size of a full fetch, so a fresh mailbox becomes browsable quickly;
+   * the row is stored with bodyState 'missing' and filled in later.
+   */
+  async getMessageMetadata(id: string): Promise<ParsedMessage | null> {
+    try {
+      const res = await this.call('messages.get', () =>
+        this.g.users.messages.get({ userId: 'me', id, format: 'metadata' })
+      )
+      return parseGmailMessage(res, 'missing')
+    } catch (err) {
       if (err instanceof GmailError && err.status === 404) return null
       throw err
     }
@@ -314,8 +335,13 @@ function decodeBody(data: string): string {
   return Buffer.from(data, 'base64url').toString('utf8')
 }
 
-/** Depth-first walk for the first text/plain and text/html parts + calendar detection */
-function extractBodies(part: gmail_v1.Schema$MessagePart | undefined): {
+/**
+ * Depth-first walk for the first text/plain and text/html parts + calendar
+ * detection. HTML-only mail (or mail whose text part is a token few words)
+ * gets its text derived from the HTML, so it is searchable and readable
+ * without the HTML renderer.
+ */
+export function extractBodies(part: gmail_v1.Schema$MessagePart | undefined): {
   text: string
   html: string | null
   hasCalendar: boolean
@@ -334,7 +360,7 @@ function extractBodies(part: gmail_v1.Schema$MessagePart | undefined): {
     for (const child of p.parts ?? []) walk(child)
   }
   walk(part)
-  return { text, html, hasCalendar }
+  return { text: bestPlainText(text, html), html, hasCalendar }
 }
 
 /** Gmail snippets are HTML-entity encoded */
@@ -383,7 +409,10 @@ function categoryOf(labels: string[], hasCalendar: boolean): string {
   return 'people'
 }
 
-export function parseGmailMessage(res: gmail_v1.Schema$Message): ParsedMessage {
+export function parseGmailMessage(
+  res: gmail_v1.Schema$Message,
+  bodyState: BodyState = 'full'
+): ParsedMessage {
   const headers = new Map<string, string>()
   for (const h of res.payload?.headers ?? []) {
     const key = h.name?.toLowerCase()
@@ -412,6 +441,7 @@ export function parseGmailMessage(res: gmail_v1.Schema$Message): ParsedMessage {
     snippet: decodeSnippet(res.snippet ?? ''),
     bodyText: text,
     bodyHtml: html,
+    bodyState,
     ...state,
     category: categoryOf(labels, hasCalendar)
   }

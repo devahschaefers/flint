@@ -9,13 +9,18 @@ import type { SyncStatus, WireAccount } from '../preload/index.d'
 
 /**
  * Per-account Gmail sync (the read side). Initial backfill walks the whole
- * mailbox newest-first with a resumable page-token checkpoint; steady-state
- * sync applies history deltas anchored at the historyId captured when the
- * account was added. Writes to Gmail live in the outbox.
+ * mailbox newest-first with a resumable page-token checkpoint in two phases:
+ * metadata first (headers, labels, snippet: the list is browsable within
+ * moments), then bodies for every metadata-only row, newest first. Opening a
+ * thread fetches its missing bodies on the spot (`ensureBodies`).
+ * Steady-state sync applies history deltas anchored at the historyId captured
+ * when the account was added. Writes to Gmail live in the outbox.
  */
 
 const ACCOUNT_COLORS = ['#4E9BF5', '#E5684F', '#43B581', '#B57EDC', '#E8B04C', '#5CC9C2']
 const BACKFILL_CONCURRENCY = 6
+/** Metadata-only rows fetched in full per body-fill round */
+const BODY_FILL_BATCH = 50
 const DELTA_INTERVAL_MS = 60_000
 /** Newest remote messages a full resync will fetch when they are missing locally */
 const RESYNC_NEW_CAP = 2000
@@ -48,6 +53,9 @@ class SyncEngine {
   private authClients = new Map<string, OAuth2Client>()
   private apis = new Map<string, GmailApi>()
   private backfilling = new Set<string>()
+  private bodyFilling = new Set<string>()
+  /** In-flight on-demand body fetches, keyed by account/thread */
+  private threadFetches = new Map<string, Promise<boolean>>()
   private deltaRunning = new Set<string>()
 
   /** Built-in OAuth client, overridable via config rows (for forks) */
@@ -136,6 +144,7 @@ class SyncEngine {
       .finally(() => this.backfilling.delete(accountId))
   }
 
+  /** Phase 1: every message as a metadata-only row, newest first */
   private async backfillLoop(accountId: string): Promise<void> {
     const api = this.api(accountId)
     for (;;) {
@@ -143,16 +152,80 @@ class SyncEngine {
       if (!state || state.done) return
       const page = await api.listMessageIds(state.pageToken ?? undefined)
       const fresh = page.ids.filter((id) => !db.hasMessage(accountId, id))
-      const parsed = await mapConcurrent(fresh, BACKFILL_CONCURRENCY, (id) => api.getMessage(id))
+      const parsed = await mapConcurrent(fresh, BACKFILL_CONCURRENCY, (id) =>
+        api.getMessageMetadata(id)
+      )
       db.upsertMessages(parsed.filter((p) => p !== null).map((p) => ({ ...p, accountId })))
       db.setBackfillState(accountId, page.nextPageToken ?? null, !page.nextPageToken)
       notifyMailChanged()
       if (!page.nextPageToken) {
-        console.log(`[sync] backfill complete: ${db.countMessages(accountId)} messages`)
+        console.log(
+          `[sync] backfill complete: ${db.countMessages(accountId)} messages, ` +
+            `${db.countMissingBodies(accountId)} bodies to fetch`
+        )
+        this.startBodyFill(accountId)
         return
       }
       await sleep(150)
     }
+  }
+
+  /** Phase 2: bodies for metadata-only rows, newest first, until none are left */
+  startBodyFill(accountId: string): void {
+    if (this.bodyFilling.has(accountId)) return
+    if (db.countMissingBodies(accountId) === 0) return
+    this.bodyFilling.add(accountId)
+    void this.bodyFillLoop(accountId)
+      .catch((err) => console.error('[sync] body fill failed:', err))
+      .finally(() => this.bodyFilling.delete(accountId))
+  }
+
+  private async bodyFillLoop(accountId: string): Promise<void> {
+    for (;;) {
+      if (!db.getAccount(accountId)) return
+      const ids = db.listMissingBodyIds(accountId, BODY_FILL_BATCH)
+      if (ids.length === 0) {
+        console.log(`[sync] body fill complete for ${accountId}`)
+        return
+      }
+      await this.fetchBodies(accountId, ids)
+      await sleep(150)
+    }
+  }
+
+  /**
+   * Fetch the bodies a thread is still missing before it is shown. Resolves
+   * true when anything was fetched. Concurrent opens of the same thread
+   * share one fetch; failures (offline, no credentials) propagate so the
+   * caller can still show what it has.
+   */
+  ensureBodies(accountId: string, threadId: string): Promise<boolean> {
+    const key = `${accountId}/${threadId}`
+    let inflight = this.threadFetches.get(key)
+    if (!inflight) {
+      inflight = (async () => {
+        const ids = db.listMissingBodyIdsInThread(accountId, threadId)
+        if (ids.length === 0) return false
+        await this.fetchBodies(accountId, ids)
+        return true
+      })().finally(() => this.threadFetches.delete(key))
+      this.threadFetches.set(key, inflight)
+    }
+    return inflight
+  }
+
+  /** Full fetch for metadata-only rows; a message Gmail no longer has is dropped */
+  private async fetchBodies(accountId: string, ids: string[]): Promise<void> {
+    const api = this.api(accountId)
+    const parsed = await mapConcurrent(ids, BACKFILL_CONCURRENCY, (id) => api.getMessage(id))
+    const full: db.MsgRecord[] = []
+    parsed.forEach((p, i) => {
+      if (p) full.push({ ...p, accountId })
+      else db.deleteMessage(accountId, ids[i])
+    })
+    // The gmail_id conflict path fills bodies into a 'missing' row (and refreshes labels)
+    db.upsertMessages(full)
+    notifyMailChanged()
   }
 
   async deltaAll(): Promise<void> {
@@ -281,9 +354,12 @@ class SyncEngine {
 
   startScheduler(): void {
     setInterval(() => void this.deltaAll(), DELTA_INTERVAL_MS)
-    // Resume any unfinished backfill and catch up shortly after launch
+    // Resume any unfinished backfill (either phase) and catch up shortly after launch
     setTimeout(() => {
-      for (const account of db.listAccounts()) this.startBackfill(account.id)
+      for (const account of db.listAccounts()) {
+        if (account.backfillDone) this.startBodyFill(account.id)
+        else this.startBackfill(account.id)
+      }
       void this.deltaAll()
     }, 1500)
   }
