@@ -20,6 +20,9 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
 - **Medium** — `pnpm lint` fails on main with 19 pre-existing errors: `require()` in
   `scripts/ensure-electron.js`, and react-hooks rules in `ComposerModal.tsx`,
   `ReplyComposer.tsx`, `RichEditor.tsx`, `SearchOverlay.tsx`.
+- **Low** — The v2 migration's table rebuild left ~1.1 GB of free pages: `mail.db` is 2.2 GB
+  on disk for 1.1 GB of live data. Run `VACUUM` after migrations (or enable
+  `auto_vacuum=INCREMENTAL` before the first one). `src/main/db.ts`.
 - **Low** — Full resync after history expiry fetches at most 2,000 newest missing messages
   (`RESYNC_NEW_CAP`); a longer gap leaves holes until the next pass. `src/main/sync.ts`.
 - **Low** — Delta sync polls every 60 s regardless of window focus. Shorten when focused,
