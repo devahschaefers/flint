@@ -21,6 +21,14 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   Retry/Discard. Gmail's batchModify also fails wholesale when any id is missing. Fix: on
   404, retry the batch per message, treat a missing message as done, and let sync remove the
   row. `src/main/outbox.ts`.
+- **Medium** — One bad row empties the whole mailbox: `init` awaits `reloadMail`, and if
+  `wireToMessage` throws on any message (seen 2026-09-08 when the storage-layer branch's
+  compactor left zstd blob bodies in the shared `mail.db`, which this main returns as
+  `Uint8Array` so `toParagraphs` calls `.split` on a buffer) the store stays empty and
+  `subscribeOnce` is never reached, so no later `onMailChanged` recovers it. Make the mapping
+  per-row tolerant and subscribe before the first load. `src/renderer/src/store.ts`,
+  `src/renderer/src/lib/wire.ts`. Until `claude/storage-layer` lands, builds from main show
+  an empty mailbox against that database.
 - **Medium** — Attachments are skipped entirely; a message with only an attachment looks
   empty. Needs part metadata + on-demand download. `src/main/google/gmail.ts`.
 - **Low** — The v2 migration's table rebuild left ~1.1 GB of free pages: `mail.db` is 2.2 GB
