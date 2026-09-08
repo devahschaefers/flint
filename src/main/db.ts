@@ -222,6 +222,16 @@ const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
       INSERT INTO messages_fts (rowid, subject, body)
       SELECT id, subject, body_text FROM messages WHERE body_codec = 'none';
     `)
+    // Normally nothing is left. But an older build opening this store writes
+    // user_version 2 back, which makes this step run again over rows the
+    // compactor has since compressed; those have to be decoded to be indexed.
+    const compressed = db
+      .prepare("SELECT id, subject, body_text, body_codec FROM messages WHERE body_codec != 'none'")
+      .all() as { id: number; subject: string; body_text: StoredBody; body_codec: BodyCodec }[]
+    const insert = db.prepare('INSERT INTO messages_fts (rowid, subject, body) VALUES (?, ?, ?)')
+    for (const r of compressed) {
+      insert.run(r.id, r.subject, decodeBody(r.body_text, r.body_codec) ?? '')
+    }
   }
 }
 
@@ -231,6 +241,9 @@ let db: Database.Database
 export function initDb(path: string = join(app.getPath('userData'), 'mail.db')): void {
   db = new Database(path)
   db.pragma('journal_mode = WAL')
+  // Big write bursts (migrations, the body compactor) grow the WAL to their
+  // size; this truncates it back after each checkpoint instead of at close
+  db.pragma('journal_size_limit = 67108864')
   db.pragma('foreign_keys = ON')
   assertSqliteVersion((db.prepare('SELECT sqlite_version() AS v').get() as { v: string }).v)
   const version = db.pragma('user_version', { simple: true }) as number
@@ -242,23 +255,40 @@ export function initDb(path: string = join(app.getPath('userData'), 'mail.db')):
       MIGRATIONS[v]?.(db)
     }
     db.exec(SCHEMA)
-    db.pragma(`user_version = ${SCHEMA_VERSION}`)
+    // Never lower the marker: a store a newer build has migrated must not be
+    // made to look old, or that build would run its migration again
+    if (version < SCHEMA_VERSION) db.pragma(`user_version = ${SCHEMA_VERSION}`)
   })()
   if (upgrading) {
     console.log(`[db] migrated v${version} → v${SCHEMA_VERSION} in ${Date.now() - started} ms`)
-    vacuum()
   }
+  maybeVacuum(upgrading)
 }
 
+/** Free-page share of the file above which it is rewritten at startup */
+const VACUUM_FREE_FRACTION = 0.25
+/** ...as long as there is at least this much to reclaim */
+const VACUUM_FREE_MIN_BYTES = 8 * 1024 * 1024
+
 /**
- * Reclaim free pages. Table rebuilds (the v2 migration) leave the old copy's
- * pages on the freelist, so the file stays twice its live size until this
- * runs. Must run outside a transaction; only called after a migration.
+ * Reclaim free pages. Table rebuilds (the v2 migration) and the body
+ * compactor rewriting every row leave the old copies on the freelist, so the
+ * file stays far larger than its live data until this runs. VACUUM must run
+ * outside a transaction and blocks for a few seconds per GB, so it happens
+ * here, before any window is shown: always after a migration, otherwise when
+ * a quarter of the file is free.
  */
-function vacuum(): void {
+function maybeVacuum(afterMigration: boolean): void {
   const pageSize = db.pragma('page_size', { simple: true }) as number
   const before = (db.pragma('page_count', { simple: true }) as number) * pageSize
   const free = (db.pragma('freelist_count', { simple: true }) as number) * pageSize
+  const worthIt =
+    free >= VACUUM_FREE_MIN_BYTES && free / Math.max(before, 1) >= VACUUM_FREE_FRACTION
+  if (!afterMigration && !worthIt) return
+  if (free === 0) {
+    console.log('[db] vacuum skipped: no free pages')
+    return
+  }
   const started = Date.now()
   db.exec('VACUUM')
   const after = (db.pragma('page_count', { simple: true }) as number) * pageSize

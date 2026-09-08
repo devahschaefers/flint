@@ -26,6 +26,12 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   account, which now means decompressing them all on every hydration (tens of MB of HTML
   per call). Goes away with paged thread queries that fetch bodies per thread.
   `src/main/db.ts`.
+- **Low** — A build still on schema v2 (any worktree behind main) that opens the shared
+  `mail.db` writes `user_version = 2` back and stores new mail as plain TEXT without FTS
+  entries; it also reads compacted bodies as raw BLOBs. The next v3 start re-runs the v3
+  step (index rebuild over every row, then VACUUM: a few seconds on the 22k mailbox), so
+  nothing is lost, but AGENTS.md's one-instance rule matters more now that the schema
+  differs across worktrees. `src/main/db.ts`.
 - **Low** — `WireMessage` carries no `bodyState`, so the renderer cannot tell an empty body
   from one not fetched yet. Threads fetch on open (`mail:thread` → `ensureBodies`), so the
   gap only shows while a fresh account's phase-2 backfill is still running.

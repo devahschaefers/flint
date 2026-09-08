@@ -545,6 +545,17 @@ describe('initDb migration v2 -> v3', () => {
     expect(() => db.assertSqliteVersion('3.53.4')).not.toThrow()
     expect(() => db.assertSqliteVersion('4.0.0')).not.toThrow()
   })
+
+  it('never lowers a user_version written by a newer build', () => {
+    const path = freshPath()
+    db.initDb(path)
+    db.closeDb()
+    const raw = new Database(path)
+    raw.pragma('user_version = 99')
+    raw.close()
+    db.initDb(path)
+    expect(pragma(path, 'user_version')).toBe(99)
+  })
 })
 
 // ---------- compactor ----------
@@ -689,5 +700,43 @@ describe('compactor', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('a v3 migration re-run over compressed rows (older build wrote user_version 2) keeps the index whole', () => {
+    const path = migrated(5)
+    createCompactor({ log: () => undefined }).runToCompletion()
+    expect(rawRows(path).every((r) => r.body_codec === 'zstd')).toBe(true)
+    db.closeDb()
+    const raw = new Database(path)
+    raw.pragma('user_version = 2')
+    raw.close()
+
+    db.initDb(path)
+    expect(pragma(path, 'user_version')).toBe(3)
+    expect(rawRows(path).every((r) => r.body_codec === 'zstd')).toBe(true)
+    expect(db.countIndexed()).toBe(7)
+    expect(db.searchMessages('"text 3"')).toHaveLength(1)
+    expect(db.searchMessages('hidden')).toHaveLength(1)
+    expect(db.getMessageWire('a', 'g3')?.bodyText.startsWith('text 3 ')).toBe(true)
+  })
+
+  it('the pages compaction frees are reclaimed by a vacuum at the next start', () => {
+    const path = freshPath()
+    const rows: V2Row[] = []
+    for (let i = 0; i < 600; i++) rows.push({ gmail_id: `g${i}`, body_text: `${i} `.repeat(8000) })
+    buildV2(path, rows)
+    db.initDb(path)
+    createCompactor({ log: () => undefined }).runToCompletion()
+    db.closeDb()
+    const freeBefore = pragma(path, 'freelist_count')
+    const pagesBefore = pragma(path, 'page_count')
+    expect(freeBefore * 4096).toBeGreaterThan(8 * 1024 * 1024)
+    expect(freeBefore / pagesBefore).toBeGreaterThan(0.25)
+
+    db.initDb(path)
+    expect(pragma(path, 'freelist_count')).toBe(0)
+    expect(pragma(path, 'page_count')).toBeLessThan(pagesBefore / 2)
+    expect(db.getMessageWire('a', 'g599')?.bodyText.startsWith('599 599 ')).toBe(true)
+    expect(db.countIndexed()).toBe(600)
   })
 })

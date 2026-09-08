@@ -24,11 +24,13 @@ export type BodyCodec = 'none' | 'zstd' | `zstd-dict:${string}`
 export const DEFAULT_CODEC: BodyCodec = 'zstd'
 
 /**
- * zstd level. Mail bodies are small (tens of KB); level 3 is zstd's default
- * and compresses at hundreds of MB/s, so a batch of a few hundred rows costs
- * tens of milliseconds. Decompression speed does not depend on the level.
+ * zstd level. Measured on 600 real bodies (30.7 MB): level 3 → 17.1% of raw
+ * in 45 ms, level 9 → 15.8% in 196 ms, level 19 → 15.4% in 5.1 s; zlib -9 →
+ * 16.4%. Level 9 buys 7% over the default for a compression cost that is
+ * still under a millisecond per message. Decompression speed does not depend
+ * on the level, and the codec id does not encode it, so it can change freely.
  */
-const ZSTD_LEVEL = 3
+const ZSTD_LEVEL = 9
 
 /** A value as SQLite hands it back: TEXT → string, BLOB → Buffer, NULL → null */
 export type StoredBody = string | Buffer | null
