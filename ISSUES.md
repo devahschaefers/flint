@@ -15,6 +15,12 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   every message, bodies fetched on open and cached. `src/main/sync.ts`.
 - **Medium** — The v1→v2 schema migration runs synchronously in `initDb` before any window
   is shown; on a 1 GB database that is ~15 s of apparent hang. `src/main/db.ts`.
+- **Medium** — A label action on a message another client deleted gets a 404 from Gmail,
+  which the outbox treats as a permanent rejection and parks as failed; because the action
+  lane is FIFO per account, that failed head blocks every later action for the account until
+  Retry/Discard. Gmail's batchModify also fails wholesale when any id is missing. Fix: on
+  404, retry the batch per message, treat a missing message as done, and let sync remove the
+  row. `src/main/outbox.ts`.
 - **Medium** — Attachments are skipped entirely; a message with only an attachment looks
   empty. Needs part metadata + on-demand download. `src/main/google/gmail.ts`.
 - **Medium** — `pnpm lint` fails on main with 19 pre-existing errors: `require()` in
