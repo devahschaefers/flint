@@ -10,27 +10,26 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   thread actions only touch loaded messages. Fix: thread-level queries, actions, and FTS
   search in main over SQLite; renderer becomes a view. `src/renderer/src/store.ts`,
   `src/main/db.ts`.
-- **Medium** — Backfill fetches every message in full (`format=full`), so a mailbox is
-  ~1 GB on disk and the first sync takes a long time. Planned: metadata-only index for
-  every message, bodies fetched on open and cached. `src/main/sync.ts`.
-- **Medium** — The v1→v2 schema migration runs synchronously in `initDb` before any window
-  is shown; on a 1 GB database that is ~15 s of apparent hang. `src/main/db.ts`.
-- **Medium** — A label action on a message another client deleted gets a 404 from Gmail,
-  which the outbox treats as a permanent rejection and parks as failed; because the action
-  lane is FIFO per account, that failed head blocks every later action for the account until
-  Retry/Discard. Gmail's batchModify also fails wholesale when any id is missing. Fix: on
-  404, retry the batch per message, treat a missing message as done, and let sync remove the
-  row. `src/main/outbox.ts`.
+- **Medium** — Schema migrations run synchronously in `initDb` before any window is shown:
+  the v1→v2 table rebuild was ~15 s on a 1 GB database, and v2→v3 adds the FTS build
+  (~1.5 s) plus a one-off `VACUUM` of the whole file. A splash/progress window, or running
+  migrations off the main thread, would hide it. `src/main/db.ts`.
 - **Medium** — Attachments are skipped entirely; a message with only an attachment looks
   empty. Needs part metadata + on-demand download. `src/main/google/gmail.ts`.
 - **Medium** — `pnpm lint` fails on main with 19 pre-existing errors: `require()` in
   `scripts/ensure-electron.js`, and react-hooks rules in `ComposerModal.tsx`,
   `ReplyComposer.tsx`, `RichEditor.tsx`, `SearchOverlay.tsx`.
-- **Low** — The v2 migration's table rebuild left ~1.1 GB of free pages: `mail.db` is 2.2 GB
-  on disk for 1.1 GB of live data. Run `VACUUM` after migrations (or enable
-  `auto_vacuum=INCREMENTAL` before the first one). `src/main/db.ts`.
 - **Low** — Full resync after history expiry fetches at most 2,000 newest missing messages
-  (`RESYNC_NEW_CAP`); a longer gap leaves holes until the next pass. `src/main/sync.ts`.
+  (`RESYNC_NEW_CAP`); a longer gap leaves holes until the next pass. It also still fetches
+  them with `format=full` rather than metadata-first like backfill. `src/main/sync.ts`.
+- **Low** — `queryWindow` still returns full bodies for the newest 1,500 messages per
+  account, which now means decompressing them all on every hydration (tens of MB of HTML
+  per call). Goes away with paged thread queries that fetch bodies per thread.
+  `src/main/db.ts`.
+- **Low** — `WireMessage` carries no `bodyState`, so the renderer cannot tell an empty body
+  from one not fetched yet. Threads fetch on open (`mail:thread` → `ensureBodies`), so the
+  gap only shows while a fresh account's phase-2 backfill is still running.
+  `src/preload/index.d.ts`, `src/main/db.ts`.
 - **Low** — Delta sync polls every 60 s regardless of window focus. Shorten when focused,
   back off when not. `src/main/sync.ts`.
 - **Low** — `hasOwnReply` counts draft replies as answering the parent, while
@@ -45,6 +44,21 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
 
 ## Fixed
 
+- ~~**Medium** — Backfill fetched every message in full (`format=full`), so a mailbox was
+  ~1 GB on disk and the first sync took a long time.~~ Metadata-first backfill: phase 1
+  stores headers/labels/snippet for every message, phase 2 fills bodies newest first, and
+  opening a thread fetches its missing bodies on the spot. `003d0d7`
+- ~~**Medium** — A label action on a message another client deleted got a 404 from Gmail,
+  which the outbox parked as failed, blocking the account's FIFO action lane; batchModify
+  fails wholesale when any id is missing.~~ On 404 the batch is retried per message and a
+  missing message counts as done; sync removes the row. `003d0d7`
+- ~~**Medium** — HTML-only mail (no `text/plain` part, or a token one) had an empty
+  `bodyText`, so it was invisible to body search and to any plain-text fallback.~~ Text is
+  derived from the HTML at parse time; the compactor does the same for rows already
+  stored. `003d0d7` `39d47ae`
+- ~~**Low** — The v2 migration's table rebuild left ~1.1 GB of free pages: `mail.db` was
+  2.2 GB on disk for 1.1 GB of live data.~~ `VACUUM` runs after any migration, with its
+  timing logged. `39d47ae`
 - ~~**High** — Failed sends looked sent: messages entered Sent before Gmail confirmed and
   failures only logged.~~ Persisted send lifecycle (queued/sending/sent/failed) with inline
   Retry/Edit. `cf51be0`

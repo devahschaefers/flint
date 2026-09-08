@@ -20,13 +20,16 @@ Gmail read sync + action writeback landed (SQLite in main, PKCE OAuth, backfill 
 delta). Still open, roughly in order:
 - Send-later was removed on purpose: reliable scheduling needs a server to hold and send
   the message; a local timer only fires while the app is running.
-- Search over the full DB: FTS5 table + IPC search endpoint (renderer search only sees the
-  hydrated window — newest 1500/account — today).
+- Search over the full DB: the FTS5 index and `db.searchMessages` (bm25 relevance, safe
+  query builder) are in main; still to do: the IPC search endpoint and the renderer switch
+  (renderer search only sees the hydrated window — newest 1500/account — today).
 - Replace the hydration window with true paged thread queries (infinite scroll from SQLite).
-- Compress bodies per message with zstd (Node's built-in zlib has it; HTML is ~1 GB raw,
-  ~150 MB compressed). Later: a trained zstd dictionary shared across messages measured
-  another ~30% off on real mail (256 KB dict: 10.7% of raw vs 14.5%); needs a training step
-  and a dictionary id per blob, so do it once the compressed store exists.
+  Stage 2 of the storage plan; the per-thread body fetch (`ensureBodies`) is already there.
+- Body compression: per-message zstd is in (codec column per row, `storage/bodies.ts`,
+  background compactor for pre-v3 rows). Still later: a trained zstd dictionary shared across
+  messages measured another ~30% off on real mail (256 KB dict: 10.7% of raw vs 14.5%);
+  needs a training step and a `zstd-dict:<id>` codec, which the codec/compactor shape
+  already leaves room for.
 - HTML rendering: per-sender remember for "Load images" (remote images are now blocked by
   default per message). Also #2's dark-mode treatment.
 - Attachments: parts are skipped entirely; store metadata + on-demand download to disk.
