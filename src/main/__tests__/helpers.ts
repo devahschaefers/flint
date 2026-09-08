@@ -68,7 +68,8 @@ export function fakeGmail(): FakeGmail {
     listMessageIds: async () => ({ ids: [] }),
     listAllMessageIds: async () => new Set<string>(),
     findByMessageId: async () => null,
-    getMessage: async (id: string) => parsed({ gmailId: id }),
+    // Read-backs are a no-op unless a test scripts the returned record
+    getMessage: async () => null,
     listHistory: async () => ({ history: [] }),
     batchModify: async () => undefined,
     send: async () => ({ id: 'gm-sent', threadId: 'th-sent' }),
