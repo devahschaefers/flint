@@ -142,8 +142,9 @@ const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
 
 let db: Database.Database
 
-export function initDb(): void {
-  db = new Database(join(app.getPath('userData'), 'mail.db'))
+/** Open (or create) the store and bring it to the current schema. `path` is a test seam. */
+export function initDb(path: string = join(app.getPath('userData'), 'mail.db')): void {
+  db = new Database(path)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
   const version = db.pragma('user_version', { simple: true }) as number
@@ -154,6 +155,10 @@ export function initDb(): void {
     db.exec(SCHEMA)
     db.pragma(`user_version = ${SCHEMA_VERSION}`)
   })()
+}
+
+export function closeDb(): void {
+  db?.close()
 }
 
 // ---------- config ----------
