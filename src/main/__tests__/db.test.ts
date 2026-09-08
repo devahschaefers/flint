@@ -287,8 +287,22 @@ describe('upsertMessages', () => {
     expect(db.listGmailIds('a')).toEqual(['G'])
     // the local body is kept; only ids/labels/snippet/date come from Gmail
     expect(local?.bodyText).toBe('body text')
-    // a queued row that Gmail already holds is still the outbox's business
-    expect(local?.state).toBe('queued')
+    // Gmail holding a non-draft copy means it went out: the outbox must not send it again
+    expect(local?.state).toBe('synced')
+  })
+
+  it('keeps a queued row queued when Gmail only holds it as a draft', () => {
+    db.putLocalMessage(localInput, me, 'queued', 'sent', null)
+    db.upsertMessages([
+      record({
+        accountId: 'a',
+        gmailId: 'GD',
+        messageIdHdr: '<H@flint.local>',
+        folder: 'drafts'
+      })
+    ])
+    const local = db.getLocalMessage('a', '<H@flint.local>')
+    expect(local).toMatchObject({ gmailId: 'GD', state: 'queued' })
   })
 
   it('moves a sent row to synced when its copy comes back', () => {

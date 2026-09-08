@@ -142,6 +142,34 @@ describe('history-expired full resync', () => {
     expect(db.countMessages(A)).toBe(4)
   })
 
+  it('does not delete our own just-sent mail that Gmail has not listed yet', async () => {
+    seedLocal()
+    db.putLocalMessage(
+      {
+        accountId: A,
+        messageIdHdr: '<sent@flint.local>',
+        to: [{ address: 'you@example.com' }],
+        cc: [],
+        subject: 'out the door',
+        text: 'body',
+        references: []
+      },
+      { name: 'Me', address: 'me@example.com' },
+      'sent',
+      'sent',
+      null
+    )
+    db.setLocalState(A, '<sent@flint.local>', { gmailId: 'g-just-sent' })
+    // Gmail's listing lags: the sent message isn't in it yet
+    remote(['g1', 'g2', 'g3'], { INBOX: ['g1', 'g2'] })
+    await syncEngine.deltaAll()
+    expect(db.getLocalMessage(A, '<sent@flint.local>')).toMatchObject({
+      state: 'sent',
+      gmailId: 'g-just-sent'
+    })
+    expect(db.countMessages(A)).toBe(4)
+  })
+
   it('keeps the old anchor when fetching new mail fails', async () => {
     seedLocal()
     remote(['g1', 'g3', 'g4'], { INBOX: ['g1', 'g3', 'g4'] })

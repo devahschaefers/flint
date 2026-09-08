@@ -350,9 +350,12 @@ ON CONFLICT(account_id, message_id_hdr) DO UPDATE SET
   important = excluded.important,
   snippet = excluded.snippet,
   date = excluded.date,
-  state = CASE WHEN messages.state IN ('sent', 'synced') THEN 'synced' ELSE messages.state END,
-  send_after = NULL,
-  send_error = NULL
+  state = CASE
+    WHEN excluded.folder = 'drafts' THEN messages.state
+    ELSE 'synced'
+  END,
+  send_after = CASE WHEN excluded.folder = 'drafts' THEN messages.send_after ELSE NULL END,
+  send_error = CASE WHEN excluded.folder = 'drafts' THEN messages.send_error ELSE NULL END
 `
 
 function toParams(r: MsgRecord): Record<string, unknown> {
@@ -430,7 +433,9 @@ export function hasMessage(accountId: string, gmailId: string): boolean {
 export function listGmailIds(accountId: string): string[] {
   return (
     db
-      .prepare('SELECT gmail_id FROM messages WHERE account_id = ? AND gmail_id IS NOT NULL')
+      .prepare(
+        "SELECT gmail_id FROM messages WHERE account_id = ? AND gmail_id IS NOT NULL AND state = 'synced'"
+      )
       .all(accountId) as { gmail_id: string }[]
   ).map((r) => r.gmail_id)
 }
@@ -442,7 +447,7 @@ export function listLabelState(
   return (
     db
       .prepare(
-        'SELECT gmail_id, folder, seen, flagged, important FROM messages WHERE account_id = ? AND gmail_id IS NOT NULL'
+        "SELECT gmail_id, folder, seen, flagged, important FROM messages WHERE account_id = ? AND gmail_id IS NOT NULL AND state = 'synced'"
       )
       .all(accountId) as {
       gmail_id: string

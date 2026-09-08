@@ -91,6 +91,27 @@ describe('queueSend', () => {
     expect(local(hdr)?.threadId).toBe('th-sent')
   })
 
+  it('sending a draft that arrived via sync deletes the Gmail draft by its message id', async () => {
+    // A synced draft carries Gmail's draft *message* id but no draft id
+    db.upsertMessages([
+      record({
+        accountId: A,
+        gmailId: 'draft-msg',
+        messageIdHdr: '<synced-draft@flint.local>',
+        folder: 'drafts'
+      })
+    ])
+    db.setLocalState(A, '<synced-draft@flint.local>', { state: 'draft' })
+    const hdr = outbox.queueSend(input({ messageIdHdr: '<synced-draft@flint.local>' }), Date.now())
+    api.script('findDraftIdForMessage', async () => 'r-draft')
+    await drain()
+    expect(local(hdr)).toMatchObject({ state: 'sent', gmailId: 'gm-sent', gmailDraftId: null })
+    const del = api.calls.find((c) => c.method === 'deleteDraft')
+    expect(del?.args).toEqual(['r-draft'])
+    expect(api.calls.find((c) => c.method === 'findDraftIdForMessage')?.args).toEqual(['draft-msg'])
+    expect(ops()).toEqual([])
+  })
+
   it('parks a send Gmail rejects (4xx) as failed', async () => {
     api.script('send', rejectWith(400, 'Invalid To header'))
     const hdr = outbox.queueSend(input(), Date.now())
@@ -232,10 +253,8 @@ describe('queueSend', () => {
     expect(ops().map((o) => o.kind)).toEqual(['send'])
     await drain()
 
+    // The send enqueues the draft's deletion and the same drain pass runs it
     expect(local(hdr)).toMatchObject({ state: 'sent', gmailDraftId: null })
-    expect(ops().map((o) => o.kind)).toEqual(['draft_delete'])
-    expect(ops()[0].payload).toMatchObject({ gmailDraftId: 'dr-1' })
-    await drain()
     expect(api.calls.find((c) => c.method === 'deleteDraft')?.args).toEqual(['dr-1'])
     expect(ops()).toEqual([])
   })
@@ -575,7 +594,8 @@ describe('discard', () => {
     })
     await outbox.discard(null)
 
-    expect(ops()).toEqual([])
+    // The discarded send lives on as a draft, and that draft gets pushed to Gmail
+    expect(ops().map((o) => [o.kind, o.payload.messageIdHdr])).toEqual([['draft_put', hdr]])
     expect(
       api.calls
         .filter((c) => c.method === 'getMessage')
@@ -637,15 +657,25 @@ describe('recoverInterrupted', () => {
     expect(api.called()).not.toContain('send')
   })
 
-  it('leaves an unverified send pending so the worker retries it', async () => {
+  it('defers an unverified send so the next attempt re-checks Gmail before sending', async () => {
     const hdr = interruptedSend()
     await recover()
     expect(api.called()).toEqual(['findByMessageId'])
-    expect(ops()[0]).toMatchObject({ kind: 'send', state: 'pending', attempts: 0 })
-    expect(local(hdr)?.state).toBe('sending')
+    // Counted as an attempt: Gmail's Message-ID search can lag acceptance, so
+    // "not found" right after a crash is not proof the message never left.
+    expect(ops()[0]).toMatchObject({ kind: 'send', state: 'pending', attempts: 1 })
+    expect(ops()[0].nextAttemptAt).toBeGreaterThan(Date.now())
+    expect(local(hdr)?.state).toBe('queued')
     await drain()
-    expect(api.called().filter((m) => m === 'send')).toHaveLength(1)
-    expect(local(hdr)?.state).toBe('sent')
+    expect(api.called()).not.toContain('send')
+
+    // Later, Gmail turns out to have it after all: no second send
+    vi.advanceTimersByTime(ops()[0].nextAttemptAt - Date.now() + 1)
+    api.script('findByMessageId', async () => 'gm-late')
+    await drain()
+    expect(api.called()).not.toContain('send')
+    expect(local(hdr)).toMatchObject({ state: 'sent', gmailId: 'gm-late' })
+    expect(ops()).toEqual([])
   })
 
   it('defers when the verification itself fails', async () => {

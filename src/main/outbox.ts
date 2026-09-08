@@ -240,6 +240,15 @@ export class Outbox {
       }
     }
     db.deleteOps(ops.map((op) => op.id))
+    // The text of a discarded send lives on as a draft, in Gmail too
+    for (const op of ops) {
+      if (op.kind === 'send') {
+        const hdr = op.payload.messageIdHdr as string
+        if (db.getLocalMessage(op.accountId, hdr)) {
+          db.enqueueOp(op.accountId, 'draft_put', { messageIdHdr: hdr })
+        }
+      }
+    }
     notifyMailChanged(true)
     for (const [accountId, gmailIds] of refetch) {
       const api = this.apiFor(accountId)
@@ -295,6 +304,15 @@ export class Outbox {
           })
           db.deleteOp(op.id)
           await this.readBack(op.accountId, gmailId)
+        } else {
+          // Not found is not proof it never left: Gmail's Message-ID search lags
+          // a little behind acceptance. Count this as an attempt and wait, so
+          // the worker asks again before it would ever send.
+          db.deferOp(op.id, 'interrupted before confirmation', Date.now() + BASE_BACKOFF_MS)
+          db.setLocalState(op.accountId, hdr, {
+            state: 'queued',
+            sendError: 'interrupted before confirmation'
+          })
         }
       } catch (err) {
         // Unknown: leave it pending; the next attempt asks again before sending
@@ -325,23 +343,30 @@ export class Outbox {
     }
     this.draining = true
     try {
-      const now = Date.now()
-      const byAccount = new Map<string, db.OpRow[]>()
-      for (const op of db.listOps()) {
-        byAccount.set(op.accountId, [...(byAccount.get(op.accountId) ?? []), op])
-      }
-      for (const [accountId, ops] of byAccount) {
-        if (!db.getAccount(accountId)) continue
-        // Actions lane: strict FIFO; a deferred/failed head blocks the lane
-        for (const op of ops.filter((o) => o.kind === 'action')) {
-          if (op.state !== 'pending' || op.nextAttemptAt > now) break
-          const ok = await this.run(op)
-          if (!ok) break
+      // Ops enqueue other ops (a send queues the delete of the draft it grew
+      // out of), so keep passing until a pass completes nothing. A failed or
+      // deferred op is no longer due, so it cannot spin the loop.
+      for (let ranAny = true; ranAny;) {
+        ranAny = false
+        const now = Date.now()
+        const byAccount = new Map<string, db.OpRow[]>()
+        for (const op of db.listOps()) {
+          byAccount.set(op.accountId, [...(byAccount.get(op.accountId) ?? []), op])
         }
-        // Independent lanes
-        for (const op of ops.filter((o) => o.kind !== 'action')) {
-          if (op.state !== 'pending' || op.nextAttemptAt > now) continue
-          await this.run(op)
+        for (const [accountId, ops] of byAccount) {
+          if (!db.getAccount(accountId)) continue
+          // Actions lane: strict FIFO; a deferred/failed head blocks the lane
+          for (const op of ops.filter((o) => o.kind === 'action')) {
+            if (op.state !== 'pending' || op.nextAttemptAt > now) break
+            const ok = await this.run(op)
+            if (!ok) break
+            ranAny = true
+          }
+          // Independent lanes
+          for (const op of ops.filter((o) => o.kind !== 'action')) {
+            if (op.state !== 'pending' || op.nextAttemptAt > now) continue
+            if (await this.run(op)) ranAny = true
+          }
         }
       }
     } finally {
@@ -456,13 +481,18 @@ export class Outbox {
       gmailId: sent.id,
       threadId: sent.threadId || local.threadId,
       sendAfter: null,
-      sendError: null
+      sendError: null,
+      gmailDraftId: null
     })
     notifyMailChanged(true)
-    // The Gmail draft this message grew out of is now redundant
-    if (local.gmailDraftId) {
-      db.setLocalState(op.accountId, hdr, { gmailDraftId: null })
-      db.enqueueOp(op.accountId, 'draft_delete', { gmailDraftId: local.gmailDraftId })
+    // The Gmail draft this message grew out of is now redundant. A draft that
+    // arrived via sync only carries its draft *message* id; the delete op
+    // resolves the draft id from it.
+    if (local.gmailDraftId || local.gmailId) {
+      db.enqueueOp(op.accountId, 'draft_delete', {
+        gmailDraftId: local.gmailDraftId,
+        gmailId: local.gmailId
+      })
     }
     await this.readBack(op.accountId, sent.id)
   }
