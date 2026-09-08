@@ -23,6 +23,10 @@ delta). Still open, roughly in order:
 - Search over the full DB: FTS5 table + IPC search endpoint (renderer search only sees the
   hydrated window — newest 1500/account — today).
 - Replace the hydration window with true paged thread queries (infinite scroll from SQLite).
+- Compress bodies per message with zstd (Node's built-in zlib has it; HTML is ~1 GB raw,
+  ~150 MB compressed). Later: a trained zstd dictionary shared across messages measured
+  another ~30% off on real mail (256 KB dict: 10.7% of raw vs 14.5%); needs a training step
+  and a dictionary id per blob, so do it once the compressed store exists.
 - HTML rendering: per-sender remember for "Load images" (remote images are now blocked by
   default per message). Also #2's dark-mode treatment.
 - Attachments: parts are skipped entirely; store metadata + on-demand download to disk.
