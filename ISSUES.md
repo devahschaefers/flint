@@ -23,9 +23,6 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   row. `src/main/outbox.ts`.
 - **Medium** — Attachments are skipped entirely; a message with only an attachment looks
   empty. Needs part metadata + on-demand download. `src/main/google/gmail.ts`.
-- **Medium** — `pnpm lint` fails on main with 19 pre-existing errors: `require()` in
-  `scripts/ensure-electron.js`, and react-hooks rules in `ComposerModal.tsx`,
-  `ReplyComposer.tsx`, `RichEditor.tsx`, `SearchOverlay.tsx`.
 - **Low** — The v2 migration's table rebuild left ~1.1 GB of free pages: `mail.db` is 2.2 GB
   on disk for 1.1 GB of live data. Run `VACUUM` after migrations (or enable
   `auto_vacuum=INCREMENTAL` before the first one). `src/main/db.ts`.
@@ -68,6 +65,11 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   payloads and senders unvalidated.~~ `b0611e6`
 - ~~**Medium** — Remote images loaded on open (tracking pixels).~~ Blocked by default with a
   per-message Load images control. `8a0571a`
+- ~~**Medium** — `pnpm lint` fails on main with 19 pre-existing errors: `require()` in
+  `scripts/ensure-electron.js`, and react-hooks rules in `ComposerModal.tsx`,
+  `ReplyComposer.tsx`, `RichEditor.tsx`, `SearchOverlay.tsx`.~~ Scripts get plain JS
+  rules; render-time ref writes moved to `useLatest`; search/composer panels mount fresh
+  on open instead of resetting state in effects. `decb6c0`
 - ~~**Medium** — No test coverage anywhere.~~ vitest suite over migration, upserts, outbox
   state machine, and history-expired reconcile. `832ca3b` `7944f99` `eb1de28`
 - ~~**Medium** — Migration dedupe subquery was quadratic (minutes on a 1 GB mailbox).~~
