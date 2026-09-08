@@ -1,6 +1,16 @@
 import Database from 'better-sqlite3'
 import { app, safeStorage } from 'electron'
 import { join } from 'path'
+import {
+  DEFAULT_CODEC,
+  decodeBody,
+  encodeBody,
+  storedSize,
+  type BodyCodec,
+  type StoredBody
+} from './storage/bodies'
+import { bestPlainText } from './storage/htmlToText'
+import { buildMatchExpression } from './storage/search'
 import type {
   Folder,
   LocalMessageInput,
@@ -18,7 +28,28 @@ import type {
  * Gmail, and user settings. The renderer is a view over it; Gmail is the
  * remote source of truth the sync engine reconciles against.
  * Dates are unix ms (cheap index comparisons).
+ *
+ * Bodies. `body_text` and `body_html` hold either plain TEXT or a BLOB the
+ * codec named in `body_codec` produced (see storage/bodies.ts): rows written
+ * before v3 are TEXT under 'none', new rows are zstd BLOBs, and the
+ * background compactor converts the former to the latter a batch at a time.
+ * `body_state` says whether the bodies are there at all: 'full' rows hold
+ * whatever the sender sent (possibly nothing), 'missing' rows came from a
+ * metadata-only fetch and still owe a body fetch. Every read path decodes and
+ * every write path encodes, so nothing outside this file sees a BLOB.
+ *
+ * Search. `messages_fts` is a contentless FTS5 index (rowid = messages.id)
+ * over subject and plain-text body. SQLite triggers cannot run the body
+ * decoder, so the index is maintained explicitly by every function here that
+ * inserts, rewrites, or deletes a message row.
  */
+
+const FTS_DDL = `
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+  subject, body,
+  content='', contentless_delete=1,
+  tokenize='unicode61 remove_diacritics 2'
+);`
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS config (
@@ -65,12 +96,18 @@ CREATE TABLE IF NOT EXISTS messages (
   state TEXT NOT NULL DEFAULT 'synced',
   send_after INTEGER,
   send_error TEXT,
+  body_codec TEXT NOT NULL DEFAULT 'none',
+  body_state TEXT NOT NULL DEFAULT 'full',
   UNIQUE(account_id, gmail_id),
   UNIQUE(account_id, message_id_hdr)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_list ON messages(account_id, folder, date DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(account_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(account_id, thread_id);
+CREATE INDEX IF NOT EXISTS idx_messages_body_codec ON messages(body_codec);
+CREATE INDEX IF NOT EXISTS idx_messages_body_missing ON messages(account_id, date DESC)
+  WHERE body_state = 'missing';
+${FTS_DDL}
 CREATE TABLE IF NOT EXISTS ops (
   id INTEGER PRIMARY KEY,
   account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -90,7 +127,33 @@ CREATE INDEX IF NOT EXISTS idx_ops_due ON ops(state, next_attempt_at);
  * previous version; the CREATE ... IF NOT EXISTS block above describes the
  * current shape for fresh databases.
  */
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
+
+/** Contentless-delete FTS5 tables need this SQLite or newer */
+const MIN_SQLITE = [3, 43, 0]
+
+function hasTable(db: Database.Database, name: string): boolean {
+  return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)
+}
+
+function columnNames(db: Database.Database, table: string): string[] {
+  return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
+}
+
+/** Throws when the linked SQLite is too old for the schema */
+export function assertSqliteVersion(version: string): void {
+  const parts = version.split('.').map((p) => Number(p) || 0)
+  for (let i = 0; i < MIN_SQLITE.length; i++) {
+    const have = parts[i] ?? 0
+    if (have > MIN_SQLITE[i]) return
+    if (have < MIN_SQLITE[i]) {
+      throw new Error(
+        `SQLite ${MIN_SQLITE.join('.')} or newer is required (FTS5 contentless_delete); ` +
+          `better-sqlite3 linked ${version}`
+      )
+    }
+  }
+}
 
 const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
   // v1 → v2: messages gain local-only rows (nullable gmail_id, message_id_hdr
@@ -137,6 +200,28 @@ const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
       FROM messages_v1 m1;
       DROP TABLE messages_v1;
     `)
+  },
+  // v2 → v3: body codec + body state columns, and the full-text index built
+  // over every existing row. Existing bodies stay plain TEXT ('none'); the
+  // background compactor compresses them later so this migration stays short.
+  3: (db) => {
+    if (!hasTable(db, 'messages')) return
+    const cols = columnNames(db, 'messages')
+    if (!cols.includes('body_codec')) {
+      db.exec("ALTER TABLE messages ADD COLUMN body_codec TEXT NOT NULL DEFAULT 'none'")
+    }
+    if (!cols.includes('body_state')) {
+      db.exec("ALTER TABLE messages ADD COLUMN body_state TEXT NOT NULL DEFAULT 'full'")
+    }
+    // A v1 store arriving here has already had SCHEMA (and so an empty index)
+    // applied by the v2 step; (re)building from scratch covers both paths.
+    // Every pre-v3 body is TEXT, so the index can be built in SQL.
+    db.exec(FTS_DDL)
+    db.exec(`
+      DELETE FROM messages_fts;
+      INSERT INTO messages_fts (rowid, subject, body)
+      SELECT id, subject, body_text FROM messages WHERE body_codec = 'none';
+    `)
   }
 }
 
@@ -147,7 +232,11 @@ export function initDb(path: string = join(app.getPath('userData'), 'mail.db')):
   db = new Database(path)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  assertSqliteVersion((db.prepare('SELECT sqlite_version() AS v').get() as { v: string }).v)
   const version = db.pragma('user_version', { simple: true }) as number
+  // v1 never set user_version, so "existing store" is judged by its tables
+  const upgrading = version < SCHEMA_VERSION && hasTable(db, 'messages')
+  const started = Date.now()
   db.transaction(() => {
     for (let v = version + 1; v <= SCHEMA_VERSION; v++) {
       MIGRATIONS[v]?.(db)
@@ -155,6 +244,31 @@ export function initDb(path: string = join(app.getPath('userData'), 'mail.db')):
     db.exec(SCHEMA)
     db.pragma(`user_version = ${SCHEMA_VERSION}`)
   })()
+  if (upgrading) {
+    console.log(`[db] migrated v${version} → v${SCHEMA_VERSION} in ${Date.now() - started} ms`)
+    vacuum()
+  }
+}
+
+/**
+ * Reclaim free pages. Table rebuilds (the v2 migration) leave the old copy's
+ * pages on the freelist, so the file stays twice its live size until this
+ * runs. Must run outside a transaction; only called after a migration.
+ */
+function vacuum(): void {
+  const pageSize = db.pragma('page_size', { simple: true }) as number
+  const before = (db.pragma('page_count', { simple: true }) as number) * pageSize
+  const free = (db.pragma('freelist_count', { simple: true }) as number) * pageSize
+  const started = Date.now()
+  db.exec('VACUUM')
+  const after = (db.pragma('page_count', { simple: true }) as number) * pageSize
+  console.log(
+    `[db] vacuum: ${mb(before)} MB (${mb(free)} MB free) → ${mb(after)} MB in ${Date.now() - started} ms`
+  )
+}
+
+function mb(bytes: number): string {
+  return (bytes / 1_048_576).toFixed(1)
 }
 
 export function closeDb(): void {
@@ -238,7 +352,13 @@ export function getAccountByEmail(email: string): WireAccount | null {
 }
 
 export function deleteAccount(id: string): void {
-  db.prepare('DELETE FROM accounts WHERE id = ?').run(id)
+  db.transaction(() => {
+    // The FTS index is not a real table, so the cascade below does not reach it
+    db.prepare(
+      'DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE account_id = ?)'
+    ).run(id)
+    db.prepare('DELETE FROM accounts WHERE id = ?').run(id)
+  })()
 }
 
 /** Refresh tokens are stored encrypted via the OS keychain (safeStorage) when available */
@@ -289,6 +409,9 @@ export function setBackfillState(accountId: string, pageToken: string | null, do
 
 // ---------- synced messages ----------
 
+/** 'missing': metadata-only row whose bodies are still to be fetched */
+export type BodyState = 'full' | 'missing'
+
 /** Column-shaped message record (what the sync engine writes) */
 export interface MsgRecord {
   accountId: string
@@ -307,6 +430,8 @@ export interface MsgRecord {
   snippet: string
   bodyText: string
   bodyHtml: string | null
+  /** Defaults to 'full' */
+  bodyState?: BodyState
   folder: Folder
   seen: boolean
   flagged: boolean
@@ -318,18 +443,19 @@ export interface MsgRecord {
  * Sync writes. A message we authored locally (state queued/sent/draft) already
  * has its row keyed by Message-ID header; when Gmail hands the same message
  * back we adopt its ids/labels onto that row rather than inserting a twin.
- * Conflicts on gmail_id (already-known synced mail) only refresh label state.
+ * Conflicts on gmail_id (already-known synced mail) refresh label state, and
+ * fill in the bodies when the row was metadata-only and the record is full.
  */
 const UPSERT_SQL = `
 INSERT INTO messages (
   account_id, gmail_id, thread_id, message_id_hdr, in_reply_to, refs,
   from_name, from_addr, to_json, cc_json, reply_to_json,
-  subject, date, snippet, body_text, body_html,
+  subject, date, snippet, body_text, body_html, body_codec, body_state,
   folder, seen, flagged, category, important, state
 ) VALUES (
   @accountId, @gmailId, @threadId, @messageIdHdr, @inReplyTo, @refs,
   @fromName, @fromAddr, @toJson, @ccJson, @replyToJson,
-  @subject, @dateMs, @snippet, @bodyText, @bodyHtml,
+  @subject, @dateMs, @snippet, @bodyText, @bodyHtml, @bodyCodec, @bodyState,
   @folder, @seen, @flagged, @category, @important, 'synced'
 )
 ON CONFLICT(account_id, gmail_id) DO UPDATE SET
@@ -339,7 +465,15 @@ ON CONFLICT(account_id, gmail_id) DO UPDATE SET
   category = excluded.category,
   important = excluded.important,
   snippet = CASE WHEN messages.snippet = '' THEN excluded.snippet ELSE messages.snippet END,
-  state = CASE WHEN messages.state IN ('sent', 'synced') THEN 'synced' ELSE messages.state END
+  state = CASE WHEN messages.state IN ('sent', 'synced') THEN 'synced' ELSE messages.state END,
+  body_text = CASE WHEN messages.body_state = 'missing' AND excluded.body_state = 'full'
+    THEN excluded.body_text ELSE messages.body_text END,
+  body_html = CASE WHEN messages.body_state = 'missing' AND excluded.body_state = 'full'
+    THEN excluded.body_html ELSE messages.body_html END,
+  body_codec = CASE WHEN messages.body_state = 'missing' AND excluded.body_state = 'full'
+    THEN excluded.body_codec ELSE messages.body_codec END,
+  body_state = CASE WHEN messages.body_state = 'missing' AND excluded.body_state = 'full'
+    THEN 'full' ELSE messages.body_state END
 ON CONFLICT(account_id, message_id_hdr) DO UPDATE SET
   gmail_id = excluded.gmail_id,
   thread_id = excluded.thread_id,
@@ -356,10 +490,14 @@ ON CONFLICT(account_id, message_id_hdr) DO UPDATE SET
   END,
   send_after = CASE WHEN excluded.folder = 'drafts' THEN messages.send_after ELSE NULL END,
   send_error = CASE WHEN excluded.folder = 'drafts' THEN messages.send_error ELSE NULL END
+RETURNING id
 `
 
 function toParams(r: MsgRecord): Record<string, unknown> {
+  const bodyState: BodyState = r.bodyState ?? 'full'
   return {
+    bodyCodec: DEFAULT_CODEC,
+    bodyState,
     accountId: r.accountId,
     gmailId: r.gmailId,
     threadId: r.threadId,
@@ -374,8 +512,8 @@ function toParams(r: MsgRecord): Record<string, unknown> {
     subject: r.subject,
     dateMs: r.dateMs,
     snippet: r.snippet,
-    bodyText: r.bodyText,
-    bodyHtml: r.bodyHtml,
+    bodyText: encodeBody(bodyState === 'missing' ? '' : r.bodyText),
+    bodyHtml: encodeBody(bodyState === 'missing' ? null : r.bodyHtml),
     folder: r.folder,
     seen: r.seen ? 1 : 0,
     flagged: r.flagged ? 1 : 0,
@@ -386,23 +524,216 @@ function toParams(r: MsgRecord): Record<string, unknown> {
 
 export function upsertMessages(records: MsgRecord[]): void {
   const stmt = db.prepare(UPSERT_SQL)
+  const existing = db.prepare(
+    'SELECT id, body_state FROM messages WHERE account_id = ? AND gmail_id = ?'
+  )
   db.transaction(() => {
     for (const r of records) {
+      const before = existing.get(r.accountId, r.gmailId) as
+        { id: number; body_state: BodyState } | undefined
+      let row: { id: number }
       try {
-        stmt.run(toParams(r))
+        row = stmt.get(toParams(r)) as { id: number }
       } catch (err) {
         // A synced message whose Message-ID collides with a *different* local
         // row (Gmail reuses headers across draft revisions): store it without
         // the header rather than losing it.
         if ((err as { code?: string }).code !== 'SQLITE_CONSTRAINT_UNIQUE') throw err
-        stmt.run({ ...toParams(r), messageIdHdr: null })
+        row = stmt.get({ ...toParams(r), messageIdHdr: null }) as { id: number }
       }
+      // Searchable content changes only for new rows (or adopted local ones)
+      // and when a metadata-only row gets its bodies; label refreshes don't touch it
+      const filled = before?.body_state === 'missing' && (r.bodyState ?? 'full') === 'full'
+      if (!before || filled) indexRow(row.id)
     }
   })()
 }
 
 export function deleteMessage(accountId: string, gmailId: string): void {
-  db.prepare('DELETE FROM messages WHERE account_id = ? AND gmail_id = ?').run(accountId, gmailId)
+  db.transaction(() => {
+    const row = db
+      .prepare('SELECT id FROM messages WHERE account_id = ? AND gmail_id = ?')
+      .get(accountId, gmailId) as { id: number } | undefined
+    if (!row) return
+    unindexRow(row.id)
+    db.prepare('DELETE FROM messages WHERE id = ?').run(row.id)
+  })()
+}
+
+// ---------- full-text index ----------
+
+/** (Re)index one row from what is stored: subject + decoded plain-text body */
+function indexRow(id: number): void {
+  const row = db
+    .prepare('SELECT subject, body_text, body_codec FROM messages WHERE id = ?')
+    .get(id) as { subject: string; body_text: StoredBody; body_codec: BodyCodec } | undefined
+  if (!row) return
+  const body = decodeBody(row.body_text, row.body_codec) ?? ''
+  db.prepare('DELETE FROM messages_fts WHERE rowid = ?').run(id)
+  db.prepare('INSERT INTO messages_fts (rowid, subject, body) VALUES (?, ?, ?)').run(
+    id,
+    row.subject,
+    body
+  )
+}
+
+function unindexRow(id: number): void {
+  db.prepare('DELETE FROM messages_fts WHERE rowid = ?').run(id)
+}
+
+export interface SearchHit {
+  /** messages.id (the FTS rowid) */
+  messageId: number
+  threadId: string | null
+  accountId: string
+  /** bm25 score: lower is better; results come back best first */
+  rank: number
+}
+
+/**
+ * Full-text search over subject + body, best match first (bm25, subject
+ * weighted 5× body). Raw user text goes through the query builder, so FTS
+ * syntax in the input is searched for, never interpreted; an input with no
+ * searchable word yields no hits.
+ */
+export function searchMessages(
+  query: string,
+  opts: { accountId?: string; limit?: number } = {}
+): SearchHit[] {
+  const match = buildMatchExpression(query)
+  if (!match) return []
+  const limit = Math.max(1, Math.min(opts.limit ?? 100, 10_000))
+  try {
+    return db
+      .prepare(
+        `SELECT messages_fts.rowid AS messageId, m.thread_id AS threadId, m.account_id AS accountId,
+                bm25(messages_fts, 5.0, 1.0) AS rank
+         FROM messages_fts
+         JOIN messages m ON m.id = messages_fts.rowid
+         WHERE messages_fts MATCH @match AND (@accountId IS NULL OR m.account_id = @accountId)
+         ORDER BY rank
+         LIMIT @limit`
+      )
+      .all({ match, accountId: opts.accountId ?? null, limit }) as SearchHit[]
+  } catch (err) {
+    // The builder should make this unreachable; a bad expression is not the user's problem
+    console.warn(`[db] search failed for ${JSON.stringify(query)}: ${(err as Error).message}`)
+    return []
+  }
+}
+
+/** Rows in the index (test/diagnostic aid) */
+export function countIndexed(): number {
+  const row = db.prepare('SELECT COUNT(*) AS n FROM messages_fts').get() as { n: number }
+  return row.n
+}
+
+// ---------- body compaction (see storage/compactor.ts) ----------
+
+export interface CompactBatch {
+  /** Rows rewritten in this batch */
+  processed: number
+  /** Rows that still need compacting after this batch */
+  remaining: number
+  bytesBefore: number
+  bytesAfter: number
+  /** Rows whose empty text body was derived from their HTML on the way */
+  textDerived: number
+}
+
+/** Codecs the compactor upgrades from (anything not the current default) */
+const STALE_CODECS: BodyCodec[] = ['none']
+
+export function countUncompacted(): number {
+  const marks = STALE_CODECS.map(() => '?').join(', ')
+  const row = db
+    .prepare(`SELECT COUNT(*) AS n FROM messages WHERE body_codec IN (${marks})`)
+    .get(...STALE_CODECS) as { n: number }
+  return row.n
+}
+
+/**
+ * Re-encode up to `limit` rows written with a stale codec into the current
+ * one, lowest id first. A row whose text body is empty but has HTML also
+ * gets its text derived (the same rule new mail goes through), so search
+ * covers it. Idempotent: a row already on the default codec is never
+ * selected. One transaction per batch.
+ */
+export function compactBodiesBatch(limit: number): CompactBatch {
+  const marks = STALE_CODECS.map(() => '?').join(', ')
+  const select = db.prepare(
+    `SELECT id, body_text, body_html, body_codec FROM messages
+     WHERE body_codec IN (${marks}) ORDER BY id LIMIT ?`
+  )
+  const update = db.prepare(
+    'UPDATE messages SET body_text = ?, body_html = ?, body_codec = ? WHERE id = ?'
+  )
+  const result: CompactBatch = {
+    processed: 0,
+    remaining: 0,
+    bytesBefore: 0,
+    bytesAfter: 0,
+    textDerived: 0
+  }
+  db.transaction(() => {
+    const rows = select.all(...STALE_CODECS, limit) as {
+      id: number
+      body_text: StoredBody
+      body_html: StoredBody
+      body_codec: BodyCodec
+    }[]
+    for (const row of rows) {
+      const text = decodeBody(row.body_text, row.body_codec) ?? ''
+      const html = decodeBody(row.body_html, row.body_codec)
+      const bestText = bestPlainText(text, html)
+      const encText = encodeBody(bestText)
+      const encHtml = encodeBody(html)
+      update.run(encText, encHtml, DEFAULT_CODEC, row.id)
+      result.processed++
+      result.bytesBefore += storedSize(row.body_text) + storedSize(row.body_html)
+      result.bytesAfter += storedSize(encText) + storedSize(encHtml)
+      if (bestText !== text) {
+        result.textDerived++
+        indexRow(row.id)
+      }
+    }
+    result.remaining = countUncompacted()
+  })()
+  return result
+}
+
+// ---------- missing bodies (metadata-first backfill) ----------
+
+export function countMissingBodies(accountId: string): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS n FROM messages WHERE account_id = ? AND body_state = 'missing'")
+    .get(accountId) as { n: number }
+  return row.n
+}
+
+/** Gmail ids of metadata-only rows, newest first (what phase-2 backfill fetches next) */
+export function listMissingBodyIds(accountId: string, limit: number): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT gmail_id FROM messages
+         WHERE account_id = ? AND body_state = 'missing' AND gmail_id IS NOT NULL
+         ORDER BY date DESC LIMIT ?`
+      )
+      .all(accountId, limit) as { gmail_id: string }[]
+  ).map((r) => r.gmail_id)
+}
+
+/** Gmail ids of metadata-only rows in one thread (fetched on open) */
+export function listMissingBodyIdsInThread(accountId: string, threadId: string): string[] {
+  return (
+    db
+      .prepare(
+        `SELECT gmail_id FROM messages
+         WHERE account_id = ? AND thread_id = ? AND body_state = 'missing' AND gmail_id IS NOT NULL`
+      )
+      .all(accountId, threadId) as { gmail_id: string }[]
+  ).map((r) => r.gmail_id)
 }
 
 /** Apply a label-state change from history sync (folder + flags only) */
@@ -481,8 +812,10 @@ interface MessageRow {
   subject: string
   date: number
   snippet: string
-  body_text: string
-  body_html: string | null
+  body_text: StoredBody
+  body_html: StoredBody
+  body_codec: BodyCodec
+  body_state: BodyState
   folder: Folder
   seen: number
   flagged: number
@@ -509,8 +842,8 @@ function rowToWire(row: MessageRow): WireMessage {
     subject: row.subject,
     dateMs: row.date,
     snippet: row.snippet,
-    bodyText: row.body_text,
-    bodyHtml: row.body_html,
+    bodyText: decodeBody(row.body_text, row.body_codec) ?? '',
+    bodyHtml: decodeBody(row.body_html, row.body_codec),
     folder: row.folder,
     seen: row.seen === 1,
     flagged: row.flagged === 1,
@@ -633,8 +966,8 @@ function rowToLocal(row: MessageRow): LocalMessage {
     to: JSON.parse(row.to_json),
     cc: JSON.parse(row.cc_json),
     subject: row.subject,
-    bodyText: row.body_text,
-    bodyHtml: row.body_html,
+    bodyText: decodeBody(row.body_text, row.body_codec) ?? '',
+    bodyHtml: decodeBody(row.body_html, row.body_codec),
     state: row.state,
     sendAfter: row.send_after
   }
@@ -659,63 +992,76 @@ export function putLocalMessage(
   folder: Folder,
   sendAfter: number | null
 ): void {
-  db.prepare(
-    `INSERT INTO messages (
-      account_id, thread_id, message_id_hdr, in_reply_to, refs,
-      from_name, from_addr, to_json, cc_json,
-      subject, date, snippet, body_text, body_html,
-      folder, seen, flagged, answered, category, important, state, send_after, send_error
-    ) VALUES (
-      @accountId, @threadId, @messageIdHdr, @inReplyTo, @refs,
-      @fromName, @fromAddr, @toJson, @ccJson,
-      @subject, @date, @snippet, @bodyText, @bodyHtml,
-      @folder, 1, 0, 0, @category, 0, @state, @sendAfter, NULL
-    )
-    ON CONFLICT(account_id, message_id_hdr) DO UPDATE SET
-      thread_id = COALESCE(messages.thread_id, excluded.thread_id),
-      in_reply_to = excluded.in_reply_to,
-      refs = excluded.refs,
-      from_name = excluded.from_name,
-      from_addr = excluded.from_addr,
-      to_json = excluded.to_json,
-      cc_json = excluded.cc_json,
-      subject = excluded.subject,
-      date = excluded.date,
-      snippet = excluded.snippet,
-      body_text = excluded.body_text,
-      body_html = excluded.body_html,
-      folder = excluded.folder,
-      category = excluded.category,
-      state = excluded.state,
-      send_after = excluded.send_after,
-      send_error = NULL`
-  ).run({
-    accountId: input.accountId,
-    threadId: input.threadId ?? null,
-    messageIdHdr: input.messageIdHdr,
-    inReplyTo: input.inReplyTo ?? null,
-    refs: JSON.stringify(input.references),
-    fromName: from.name,
-    fromAddr: from.address,
-    toJson: JSON.stringify(input.to),
-    ccJson: JSON.stringify(input.cc),
-    subject: input.subject,
-    date: Date.now(),
-    snippet: input.text.slice(0, 200),
-    bodyText: input.text,
-    bodyHtml: input.html ?? null,
-    folder,
-    category: input.category ?? 'people',
-    state,
-    sendAfter
-  })
+  db.transaction(() => {
+    const row = db
+      .prepare(
+        `INSERT INTO messages (
+          account_id, thread_id, message_id_hdr, in_reply_to, refs,
+          from_name, from_addr, to_json, cc_json,
+          subject, date, snippet, body_text, body_html, body_codec, body_state,
+          folder, seen, flagged, answered, category, important, state, send_after, send_error
+        ) VALUES (
+          @accountId, @threadId, @messageIdHdr, @inReplyTo, @refs,
+          @fromName, @fromAddr, @toJson, @ccJson,
+          @subject, @date, @snippet, @bodyText, @bodyHtml, @bodyCodec, 'full',
+          @folder, 1, 0, 0, @category, 0, @state, @sendAfter, NULL
+        )
+        ON CONFLICT(account_id, message_id_hdr) DO UPDATE SET
+          thread_id = COALESCE(messages.thread_id, excluded.thread_id),
+          in_reply_to = excluded.in_reply_to,
+          refs = excluded.refs,
+          from_name = excluded.from_name,
+          from_addr = excluded.from_addr,
+          to_json = excluded.to_json,
+          cc_json = excluded.cc_json,
+          subject = excluded.subject,
+          date = excluded.date,
+          snippet = excluded.snippet,
+          body_text = excluded.body_text,
+          body_html = excluded.body_html,
+          body_codec = excluded.body_codec,
+          body_state = 'full',
+          folder = excluded.folder,
+          category = excluded.category,
+          state = excluded.state,
+          send_after = excluded.send_after,
+          send_error = NULL
+        RETURNING id`
+      )
+      .get({
+        accountId: input.accountId,
+        threadId: input.threadId ?? null,
+        messageIdHdr: input.messageIdHdr,
+        inReplyTo: input.inReplyTo ?? null,
+        refs: JSON.stringify(input.references),
+        fromName: from.name,
+        fromAddr: from.address,
+        toJson: JSON.stringify(input.to),
+        ccJson: JSON.stringify(input.cc),
+        subject: input.subject,
+        date: Date.now(),
+        snippet: input.text.slice(0, 200),
+        bodyText: encodeBody(input.text),
+        bodyHtml: encodeBody(input.html ?? null),
+        bodyCodec: DEFAULT_CODEC,
+        folder,
+        category: input.category ?? 'people',
+        state,
+        sendAfter
+      }) as { id: number }
+    indexRow(row.id)
+  })()
 }
 
 export function deleteLocalMessage(accountId: string, messageIdHdr: string): void {
-  db.prepare('DELETE FROM messages WHERE account_id = ? AND message_id_hdr = ?').run(
-    accountId,
-    messageIdHdr
-  )
+  db.transaction(() => {
+    const row = db
+      .prepare('SELECT id FROM messages WHERE account_id = ? AND message_id_hdr = ?')
+      .get(accountId, messageIdHdr) as { id: number } | undefined
+    if (!row) return
+    unindexRow(row.id)
+    db.prepare('DELETE FROM messages WHERE id = ?').run(row.id)
+  })()
 }
 
 export function setLocalState(
