@@ -23,9 +23,8 @@ delta). Still open, roughly in order:
 - Search over the full DB: FTS5 table + IPC search endpoint (renderer search only sees the
   hydrated window — newest 1500/account — today).
 - Replace the hydration window with true paged thread queries (infinite scroll from SQLite).
-- HTML rendering hardening: remote images are still loaded (tracking pixels!) — block by
-  default with a per-sender allow. Also #2's dark-mode treatment. Sanitization (DOMPurify)
-  is already in.
+- HTML rendering: per-sender remember for "Load images" (remote images are now blocked by
+  default per message). Also #2's dark-mode treatment.
 - Attachments: parts are skipped entirely; store metadata + on-demand download to disk.
 - \Answered flag: Gmail doesn't expose it via labels; derive from own replies in-thread.
 - iCloud account support: IMAP adapter (imapflow/mailparser/nodemailer) + app-specific
