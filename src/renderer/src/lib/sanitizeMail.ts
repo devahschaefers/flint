@@ -201,7 +201,9 @@ export function sanitizeMailHtml(html: string, opts: SanitizeMailOptions): Sanit
  * - `<img src="">` and `<img>` → untouched, not counted.
  * - `<img srcset="https://h/a.png 1x, https://h/b.png 2x" src="data:...">` → srcset
  *   removed, data src kept, counted once.
- * - `<img srcset="data:image/png;base64,AAA 1x, data:image/png;base64,BBB 2x">` → kept.
+ * - `<img srcset="data:image/png;base64,AAA 1x, data:image/png;base64,BBB 2x">` → srcset
+ *   dropped by DOMPurify itself (its URI allowlist only special-cases data: on src/href),
+ *   so it is not counted: blockedImages === 0.
  * - `<picture><source srcset="https://h/a.webp" type="image/webp"><img src="https://h/a.jpg"></picture>`
  *   → both srcset and src gone; blockedImages === 2 (one per element).
  * - `<video poster="https://h/p.jpg" src="https://h/v.mp4"></video>` → both removed, counted once.
