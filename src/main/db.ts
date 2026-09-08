@@ -14,7 +14,7 @@ import type {
 /**
  * Local mail store. SQLite in the main process is the source of truth for
  * everything the app knows — synced mail, locally-authored mail (drafts,
- * queued/scheduled/failed sends), the outbox of operations still owed to
+ * queued/failed sends), the outbox of operations still owed to
  * Gmail, and user settings. The renderer is a view over it; Gmail is the
  * remote source of truth the sync engine reconciles against.
  * Dates are unix ms (cheap index comparisons).

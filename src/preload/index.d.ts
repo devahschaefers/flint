@@ -14,7 +14,7 @@ export type MailAction = 'seen' | 'flagged' | 'archive' | 'unarchive' | 'trash' 
  * Lifecycle of a message row.
  * - synced: mirrors Gmail
  * - draft: local draft (may also exist in Gmail's Drafts once pushed)
- * - queued: waiting to be sent (undo window or scheduled time not yet reached)
+ * - queued: waiting to be sent (undo window not yet elapsed, or retrying after a transient error)
  * - sending: handed to the outbox worker
  * - sent: Gmail accepted it; the synced copy hasn't been pulled back yet
  * - failed: Gmail rejected it; needs Retry or Edit
@@ -63,7 +63,7 @@ export interface WireMessage {
   category: string
   important: boolean
   state: MessageState
-  /** When a queued message is due to leave (undo window / scheduled send) */
+  /** When a queued message is due to leave (end of the undo window) */
   sendAfterMs: number | null
   /** Last send error, for queued (retrying) and failed messages */
   sendError: string | null
@@ -134,17 +134,17 @@ export interface MailApi {
 
   /** Store a draft (local row + queued push to Gmail Drafts); resolves with its Message-ID */
   saveDraft(input: LocalMessageInput): Promise<string>
-  /** Delete a local message (draft, or a scheduled/failed send); pushes the delete to Gmail when it has a draft there */
+  /** Delete a local message (draft, or a failed send); pushes the delete to Gmail when it has a draft there */
   deleteLocalMessage(accountId: string, messageIdHdr: string): Promise<void>
   /**
    * Queue a message to send. `sendAfterMs` is the earliest send time (now for
-   * immediate, a few seconds out for an undo window, later for scheduling).
+   * immediate, a few seconds out for an undo window).
    * Resolves with the message's Message-ID.
    */
   queueSend(input: LocalMessageInput, sendAfterMs: number): Promise<string>
   /**
-   * Pull a queued message back before it leaves. `asDraft` keeps it as a draft
-   * (cancelling a scheduled send); otherwise it is deleted (toast Undo).
+   * Pull a queued or failed message back. `asDraft` keeps it as a draft
+   * (editing a failed send); otherwise it is deleted (toast Undo).
    * Resolves false when it was already sending/sent.
    */
   cancelSend(accountId: string, messageIdHdr: string, asDraft: boolean): Promise<boolean>

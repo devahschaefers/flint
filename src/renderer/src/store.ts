@@ -194,10 +194,8 @@ interface AppState {
   sendReply: (threadId: string, body: string, html?: string) => string | null
   /** Pull a queued reply back before it leaves (toast Undo) */
   unsend: (messageId: string) => void
-  /** "Send later": queues the reply to leave after the delay; persisted, survives restarts */
-  scheduleReply: (threadId: string, body: string, html: string | undefined, delayMs: number) => void
-  /** Turn a scheduled (or failed) message back into a draft */
-  cancelScheduled: (messageId: string) => void
+  /** Turn a failed send back into a draft so it can be edited */
+  revertToDraft: (messageId: string) => void
   /** Re-queue a failed send */
   retrySend: (messageId: string) => void
   /** Outbox recovery: push every errored op again, or drop them and re-fetch from Gmail */
@@ -391,13 +389,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
     if (!target) return
     window.api.cancelSend(target.accountId, messageId, false).catch(logFailure('undo send'))
   },
-  scheduleReply: (threadId, body, html, delayMs) => {
-    queueReply(get(), threadId, body, html, delayMs)
-  },
-  cancelScheduled: (messageId) => {
+  revertToDraft: (messageId) => {
     const target = get().messages.find((m) => m.messageId === messageId)
     if (!target) return
-    window.api.cancelSend(target.accountId, messageId, true).catch(logFailure('cancel send'))
+    window.api.cancelSend(target.accountId, messageId, true).catch(logFailure('revert to draft'))
   },
   retrySend: (messageId) => {
     const target = get().messages.find((m) => m.messageId === messageId)
@@ -442,8 +437,9 @@ function persistSetting(key: string, value: string): void {
 
 /**
  * Build a reply to the latest counterpart in a thread and queue it to leave
- * after `delayMs`. Recipients and body are fixed now and persisted with the
- * message, so later activity in the thread cannot change where it goes.
+ * after `delayMs` (the undo window). Recipients and body are fixed now and
+ * persisted with the message, so nothing that happens in the meantime can
+ * change where it goes.
  */
 function queueReply(
   s: AppState,

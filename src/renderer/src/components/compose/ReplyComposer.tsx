@@ -1,34 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useEditorState } from '@tiptap/react'
-import { ChevronDown, Maximize2, X } from 'lucide-react'
+import { Maximize2, X } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store'
 import { useComposeEditor, RichEditorContent } from './RichEditor'
 import Toolbar from './Toolbar'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from '../ui/dropdown-menu'
 
 type Mode = 'collapsed' | 'open' | 'full'
 
 const TOAST_MS = 2600
-
-function nextMorning8(): Date {
-  const d = new Date()
-  d.setDate(d.getDate() + 1)
-  d.setHours(8, 0, 0, 0)
-  return d
-}
-
-const SEND_LATER_OPTIONS: { label: string; at: () => Date }[] = [
-  { label: 'In 1 minute', at: () => new Date(Date.now() + 60_000) },
-  { label: 'In 1 hour', at: () => new Date(Date.now() + 3_600_000) },
-  { label: 'Tomorrow 8:00 AM', at: nextMorning8 }
-]
 
 interface ReplyComposerProps {
   threadId: string
@@ -40,9 +21,11 @@ interface ReplyComposerProps {
  * rich composer (auto-grow, drag-resizable) → fullscreen. The editor instance
  * survives collapse, so an unsent reply is still there when reopened.
  */
-export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerProps): React.JSX.Element {
+export default function ReplyComposer({
+  threadId,
+  replyLabel
+}: ReplyComposerProps): React.JSX.Element {
   const sendReply = useAppStore((s) => s.sendReply)
-  const scheduleReply = useAppStore((s) => s.scheduleReply)
   const unsend = useAppStore((s) => s.unsend)
   const showWordCount = useAppStore((s) => s.showWordCount)
 
@@ -97,14 +80,6 @@ export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerPro
   const sendRef = useRef(send)
   sendRef.current = send
 
-  const sendLater = (at: Date): void => {
-    if (!editor || !editor.getText().trim()) return
-    scheduleReply(threadId, editor.getText(), editor.getHTML(), Math.max(0, at.getTime() - Date.now()))
-    editor.commands.clearContent()
-    closeComposer()
-    showToast(`Scheduled · sends ${at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`)
-  }
-
   // Focus when opening; keep focus through fullscreen toggles
   useEffect(() => {
     if (mode !== 'collapsed' && editor) {
@@ -139,7 +114,9 @@ export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerPro
     const startY = e.clientY
     const startH = editorEl.getBoundingClientRect().height
     const move = (ev: MouseEvent): void =>
-      setCustomHeight(Math.min(Math.max(80, startH + (startY - ev.clientY)), window.innerHeight - 240))
+      setCustomHeight(
+        Math.min(Math.max(80, startH + (startY - ev.clientY)), window.innerHeight - 240)
+      )
     const up = (): void => {
       window.removeEventListener('mousemove', move)
       window.removeEventListener('mouseup', up)
@@ -167,7 +144,11 @@ export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerPro
         </div>
       )}
       <div className="absolute right-2 top-1.5 z-[5] flex items-center gap-0.5">
-        <button title={full ? 'Exit fullscreen' : 'Fullscreen'} className={cornerChip} onClick={() => setMode(full ? 'open' : 'full')}>
+        <button
+          title={full ? 'Exit fullscreen' : 'Fullscreen'}
+          className={cornerChip}
+          onClick={() => setMode(full ? 'open' : 'full')}
+        >
           <Maximize2 size={12} />
         </button>
         <button title="Close" className={cornerChip} onClick={closeComposer}>
@@ -182,7 +163,13 @@ export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerPro
           editor={editor}
           slashOpenRef={slashOpenRef}
           className={cn(full && 'flex-1')}
-          style={full ? undefined : customHeight ? { height: customHeight } : { minHeight: 110, maxHeight: '58vh' }}
+          style={
+            full
+              ? undefined
+              : customHeight
+                ? { height: customHeight }
+                : { minHeight: 110, maxHeight: '58vh' }
+          }
         />
       </div>
 
@@ -194,29 +181,16 @@ export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerPro
         >
           Send
         </button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              disabled={!hasText}
-              className="flex items-center gap-1 rounded-[7px] border border-white/10 px-2.5 py-[5px] text-[12px] text-text-secondary transition-colors hover:text-text-primary disabled:opacity-40"
-            >
-              Send later <ChevronDown size={12} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="z-[80]">
-            {SEND_LATER_OPTIONS.map(({ label, at }) => (
-              <DropdownMenuItem key={label} onSelect={() => sendLater(at())}>
-                {label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <button onClick={closeComposer} className="px-1.5 text-[12px] text-text-secondary transition-colors hover:text-text-primary">
+        <button
+          onClick={closeComposer}
+          className="px-1.5 text-[12px] text-text-secondary transition-colors hover:text-text-primary"
+        >
           Cancel
         </button>
         <span className="flex-1" />
         <span className="text-[11px] text-text-muted">
-          {showWordCount && hasText ? `${wordCount} ${wordCount === 1 ? 'word' : 'words'} · ` : ''}# heading · / commands · ⌘↵ send
+          {showWordCount && hasText ? `${wordCount} ${wordCount === 1 ? 'word' : 'words'} · ` : ''}#
+          heading · / commands · ⌘↵ send
         </span>
       </div>
     </div>
@@ -231,7 +205,9 @@ export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerPro
         >
           {hasText ? (
             <span className="truncate">
-              <span className="mr-1.5 text-[11px] font-semibold uppercase tracking-wide text-yellow-3">Draft</span>
+              <span className="mr-1.5 text-[11px] font-semibold uppercase tracking-wide text-yellow-3">
+                Draft
+              </span>
               {text}
             </span>
           ) : (
@@ -242,7 +218,9 @@ export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerPro
       {mode === 'open' && card}
       {full &&
         createPortal(
-          <div className="fixed inset-0 z-[70] flex flex-col items-center bg-elevation-0 pb-6 pt-8">{card}</div>,
+          <div className="fixed inset-0 z-[70] flex flex-col items-center bg-elevation-0 pb-6 pt-8">
+            {card}
+          </div>,
           document.body
         )}
       {toast &&
@@ -250,7 +228,10 @@ export default function ReplyComposer({ threadId, replyLabel }: ReplyComposerPro
           <div className="fixed bottom-[84px] left-1/2 z-[90] flex -translate-x-1/2 items-center gap-3 rounded-[20px] bg-elevation-2 py-2 pl-4 pr-3 text-[12.5px] text-text-primary shadow-[0_6px_20px_rgba(0,0,0,0.5)]">
             {toast.text}
             {toast.undo && (
-              <button onClick={toast.undo} className="font-semibold text-blue-3 transition-colors hover:text-white">
+              <button
+                onClick={toast.undo}
+                className="font-semibold text-blue-3 transition-colors hover:text-white"
+              >
                 Undo
               </button>
             )}

@@ -153,7 +153,7 @@ export class Outbox {
 
   /**
    * Cancel a queued send. Returns false once the message is sending or sent.
-   * `asDraft` turns it back into a draft (scheduled-send cancel); otherwise the
+   * `asDraft` turns it back into a draft (editing a failed send); otherwise the
    * message is deleted (toast Undo — the composer restores the text itself).
    */
   cancelSend(accountId: string, messageIdHdr: string, asDraft: boolean): boolean {
@@ -304,10 +304,10 @@ export class Outbox {
     }
   }
 
-  /** Ask the worker to drain soon (or at a specific delay for a scheduled send) */
+  /** Ask the worker to drain soon (or once an undo window elapses) */
   kick(delayMs = 0): void {
     if (delayMs > 0) {
-      // Precise wake for undo windows / near-term schedules; polling covers the rest
+      // Precise wake for undo windows; polling covers retries
       if (delayMs <= POLL_MS * 6) setTimeout(() => this.kick(), delayMs + 50)
       return
     }
