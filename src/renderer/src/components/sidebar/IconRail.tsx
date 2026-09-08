@@ -61,7 +61,11 @@ export default function IconRail(): React.JSX.Element {
         <RailButton label="Pins" active={isActive('pins')} onClick={() => setRailItem('pins')}>
           <Pin {...iconProps} />
         </RailButton>
-        <RailButton label="Drafts" active={isActive('drafts')} onClick={() => setRailItem('drafts')}>
+        <RailButton
+          label="Drafts"
+          active={isActive('drafts')}
+          onClick={() => setRailItem('drafts')}
+        >
           <File {...iconProps} />
         </RailButton>
         <RailButton label="Sent" active={isActive('sent')} onClick={() => setRailItem('sent')}>

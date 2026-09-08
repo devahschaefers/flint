@@ -18,8 +18,18 @@ export interface ResolvedIdentity {
 }
 
 const AVATAR_COLORS = [
-  '#6623FF', '#2196F3', '#EC00AF', '#C56BDA', '#43A047', '#FF7043',
-  '#0288D1', '#7B1FA2', '#00897B', '#5C6BC0', '#D81B60', '#F4511E'
+  '#6623FF',
+  '#2196F3',
+  '#EC00AF',
+  '#C56BDA',
+  '#43A047',
+  '#FF7043',
+  '#0288D1',
+  '#7B1FA2',
+  '#00897B',
+  '#5C6BC0',
+  '#D81B60',
+  '#F4511E'
 ]
 
 export function colorForAddress(address: string): string {
