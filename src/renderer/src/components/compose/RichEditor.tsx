@@ -1,112 +1,24 @@
-import { useEffect, useRef, useState } from 'react'
-import { EditorContent, Node, useEditor, type Editor } from '@tiptap/react'
+import { useEffect, useLayoutEffect, useState } from 'react'
+import { EditorContent, type Editor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import { StarterKit } from '@tiptap/starter-kit'
-import { Placeholder } from '@tiptap/extensions'
-import { Bold, Code, Heading2, Image as ImageIcon, Italic, List, Quote, Underline } from 'lucide-react'
+import {
+  Bold,
+  Code,
+  Heading2,
+  Image as ImageIcon,
+  Italic,
+  List,
+  Quote,
+  Underline
+} from 'lucide-react'
 import { cn } from '../../lib/utils'
+import { insertImagePlaceholder, promptForLink } from './composeEditor'
 
 /**
- * Shared rich-text editor for the reply composer and the New Message modal.
- * StarterKit supplies the marks/blocks plus the markdown input rules from the
- * handoff (`#`, `##`, `-`, `1.`, `>`, ``` + space/enter). This file adds the
- * image-placeholder block, the floating selection toolbar, and the `/` menu.
+ * Shared rich-text editor UI for the reply composer and the New Message modal:
+ * the editor surface, the floating selection toolbar, and the `/` insert menu.
+ * The TipTap instance itself comes from `useComposeEditor` in composeEditor.ts.
  */
-
-/** Non-editable stand-in block until real attachments land */
-const ImagePlaceholder = Node.create({
-  name: 'imagePlaceholder',
-  group: 'block',
-  atom: true,
-  parseHTML() {
-    return [{ tag: 'div.imgph' }]
-  },
-  renderHTML() {
-    return ['div', { class: 'imgph' }]
-  }
-})
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
-/** text/plain paragraphs → minimal HTML, for editing legacy drafts rich */
-export function paragraphsToHtml(paragraphs: string[]): string {
-  return paragraphs.map((p) => `<p>${escapeHtml(p)}</p>`).join('')
-}
-
-export function useComposeEditor({
-  placeholder,
-  onSend
-}: {
-  placeholder: string
-  /** ⌘/Ctrl+Enter inside the editor */
-  onSend?: () => void
-}): Editor | null {
-  const onSendRef = useRef(onSend)
-  onSendRef.current = onSend
-
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [2, 3] },
-        link: { openOnClick: false }
-      }),
-      Placeholder.configure({ placeholder }),
-      ImagePlaceholder
-    ],
-    editorProps: {
-      attributes: { class: 'rt rt-editor' },
-      handleKeyDown: (_view, event) => {
-        if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-          onSendRef.current?.()
-          return true
-        }
-        return false
-      }
-    }
-  })
-
-  // Dev-only handle so tooling can inspect/drive the editors
-  useEffect(() => {
-    if (!import.meta.env.DEV || !editor) return
-    const w = window as unknown as { __editors?: Set<Editor> }
-    w.__editors ??= new Set()
-    w.__editors.add(editor)
-    return (): void => {
-      w.__editors?.delete(editor)
-    }
-  }, [editor])
-
-  // Live placeholder updates (the reply label changes with the thread)
-  useEffect(() => {
-    if (!editor) return
-    const ext = editor.extensionManager.extensions.find((e) => e.name === 'placeholder')
-    if (ext && ext.options.placeholder !== placeholder) {
-      ext.options.placeholder = placeholder
-      editor.view.dispatch(editor.state.tr)
-    }
-  }, [editor, placeholder])
-
-  return editor
-}
-
-export function promptForLink(editor: Editor): void {
-  if (editor.isActive('link')) {
-    editor.chain().focus().unsetLink().run()
-    return
-  }
-  const url = window.prompt('Link URL', 'https://')
-  if (url && url !== 'https://') editor.chain().focus().setLink({ href: url }).run()
-}
-
-export function insertImagePlaceholder(editor: Editor): void {
-  editor
-    .chain()
-    .focus()
-    .insertContent([{ type: 'imagePlaceholder' }, { type: 'paragraph' }])
-    .run()
-}
 
 /** 26px hover chip used by every editor toolbar (mousedown keeps the selection) */
 export function EditorChip({
@@ -138,8 +50,16 @@ export function EditorChip({
 }
 
 const SLASH_ITEMS = [
-  { label: 'Heading', icon: Heading2, apply: (e: Editor) => e.chain().focus().setHeading({ level: 2 }).run() },
-  { label: 'Bulleted list', icon: List, apply: (e: Editor) => e.chain().focus().toggleBulletList().run() },
+  {
+    label: 'Heading',
+    icon: Heading2,
+    apply: (e: Editor) => e.chain().focus().setHeading({ level: 2 }).run()
+  },
+  {
+    label: 'Bulleted list',
+    icon: List,
+    apply: (e: Editor) => e.chain().focus().toggleBulletList().run()
+  },
   { label: 'Quote', icon: Quote, apply: (e: Editor) => e.chain().focus().setBlockquote().run() },
   { label: 'Code block', icon: Code, apply: (e: Editor) => e.chain().focus().setCodeBlock().run() },
   { label: 'Image', icon: ImageIcon, apply: insertImagePlaceholder }
@@ -160,7 +80,12 @@ export function RichEditorContent({
   slashOpenRef
 }: RichEditorContentProps): React.JSX.Element | null {
   const [slashAt, setSlashAt] = useState<{ x: number; y: number } | null>(null)
-  if (slashOpenRef) slashOpenRef.current = slashAt !== null
+
+  // Published right after commit so the ancestor's capture-phase Escape listener
+  // reads the menu state before the next key event arrives
+  useLayoutEffect(() => {
+    if (slashOpenRef) slashOpenRef.current = slashAt !== null
+  }, [slashOpenRef, slashAt])
 
   // Detect a lone "/" on an empty paragraph → open the insert menu at the caret
   useEffect(() => {
@@ -186,11 +111,7 @@ export function RichEditorContent({
 
   const applySlashItem = (apply: (e: Editor) => void): void => {
     const { $from } = editor.state.selection
-    editor
-      .chain()
-      .focus()
-      .deleteRange({ from: $from.start(), to: $from.end() })
-      .run()
+    editor.chain().focus().deleteRange({ from: $from.start(), to: $from.end() }).run()
     apply(editor)
     setSlashAt(null)
   }
@@ -218,23 +139,47 @@ export function RichEditorContent({
 
       <BubbleMenu editor={editor} options={{ placement: 'top', offset: 8 }}>
         <div className="flex items-center gap-0.5 rounded-[8px] border border-white/10 bg-elevation-2 p-1 shadow-[0_6px_20px_rgba(0,0,0,0.5)]">
-          <EditorChip title="Bold" active={editor.isActive('bold')} onCmd={() => editor.chain().focus().toggleBold().run()}>
+          <EditorChip
+            title="Bold"
+            active={editor.isActive('bold')}
+            onCmd={() => editor.chain().focus().toggleBold().run()}
+          >
             <Bold size={13} />
           </EditorChip>
-          <EditorChip title="Italic" active={editor.isActive('italic')} onCmd={() => editor.chain().focus().toggleItalic().run()}>
+          <EditorChip
+            title="Italic"
+            active={editor.isActive('italic')}
+            onCmd={() => editor.chain().focus().toggleItalic().run()}
+          >
             <Italic size={13} />
           </EditorChip>
-          <EditorChip title="Underline" active={editor.isActive('underline')} onCmd={() => editor.chain().focus().toggleUnderline().run()}>
+          <EditorChip
+            title="Underline"
+            active={editor.isActive('underline')}
+            onCmd={() => editor.chain().focus().toggleUnderline().run()}
+          >
             <Underline size={13} />
           </EditorChip>
           <span className="mx-0.5 h-[15px] w-px bg-white/10" />
-          <EditorChip title="Heading" active={editor.isActive('heading', { level: 2 })} onCmd={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}>
+          <EditorChip
+            title="Heading"
+            active={editor.isActive('heading', { level: 2 })}
+            onCmd={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          >
             <span className="text-[11px] font-bold">H1</span>
           </EditorChip>
-          <EditorChip title="Quote" active={editor.isActive('blockquote')} onCmd={() => editor.chain().focus().toggleBlockquote().run()}>
+          <EditorChip
+            title="Quote"
+            active={editor.isActive('blockquote')}
+            onCmd={() => editor.chain().focus().toggleBlockquote().run()}
+          >
             <Quote size={13} />
           </EditorChip>
-          <EditorChip title="Link" active={editor.isActive('link')} onCmd={() => promptForLink(editor)}>
+          <EditorChip
+            title="Link"
+            active={editor.isActive('link')}
+            onCmd={() => promptForLink(editor)}
+          >
             <span className="text-[11px] underline">a</span>
           </EditorChip>
         </div>
