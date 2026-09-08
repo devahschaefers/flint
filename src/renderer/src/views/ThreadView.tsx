@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import DOMPurify from 'dompurify'
 import { motion } from 'motion/react'
-import { ArrowLeft, Check, Pin } from 'lucide-react'
+import { ArrowLeft, Check, ImageOff, Pin } from 'lucide-react'
 import { shortDate } from '../lib/dates'
+import { sanitizeMailHtml } from '../lib/sanitizeMail'
 import { buildThreads } from '../lib/threads'
 import { resolveMailbox, resolveNames } from '../lib/identity'
 import { isOwnAddress, useAppStore } from '../store'
@@ -20,6 +20,50 @@ interface MessageBlockProps {
   message: Message
   contacts: Contact[]
   isDraft?: boolean
+}
+
+interface HtmlBodyProps {
+  html: string
+}
+
+/**
+ * The message's text/html part. Real synced mail flows through here, so it is
+ * always sanitized (scripts, event handlers, forms stripped) and remote images
+ * are blocked until the reader opts in for this one message.
+ */
+function HtmlBody({ html }: HtmlBodyProps): React.JSX.Element {
+  const [allowRemoteImages, setAllowRemoteImages] = useState(false)
+  const sanitized = useMemo(
+    () => sanitizeMailHtml(html, { allowRemoteImages }),
+    [html, allowRemoteImages]
+  )
+
+  return (
+    <>
+      {sanitized.blockedImages > 0 && (
+        <div className="mt-4 flex items-center gap-1.5 text-[12px] text-text-muted">
+          <ImageOff size={13} strokeWidth={1.8} />
+          <span>Images hidden</span>
+          <span aria-hidden>·</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              // A draft's block opens the composer on click; loading images is not that.
+              e.stopPropagation()
+              setAllowRemoteImages(true)
+            }}
+            className="text-blue-3 transition-colors hover:underline"
+          >
+            Load images
+          </button>
+        </div>
+      )}
+      <div
+        className="rt mt-4 overflow-x-auto"
+        dangerouslySetInnerHTML={{ __html: sanitized.html }}
+      />
+    </>
+  )
 }
 
 /** One fully-expanded message: sender card, recipients line, body paragraphs. */
@@ -58,17 +102,7 @@ function MessageBlock({ message, contacts, isDraft }: MessageBlockProps): React.
       </div>
 
       {message.bodyHtml ? (
-        // The message's text/html part. Real synced mail flows through here, so
-        // it is always sanitized (scripts, event handlers, and forms stripped).
-        <div
-          className="rt mt-4 overflow-x-auto"
-          dangerouslySetInnerHTML={{
-            __html: DOMPurify.sanitize(message.bodyHtml, {
-              USE_PROFILES: { html: true },
-              FORBID_TAGS: ['style', 'form', 'input', 'button']
-            })
-          }}
-        />
+        <HtmlBody html={message.bodyHtml} />
       ) : (
         <div className="mt-4">
           {message.body.map((paragraph, i) => (
