@@ -98,12 +98,14 @@ CREATE TABLE IF NOT EXISTS messages (
   send_error TEXT,
   body_codec TEXT NOT NULL DEFAULT 'none',
   body_state TEXT NOT NULL DEFAULT 'full',
+  thread_key TEXT GENERATED ALWAYS AS (COALESCE(thread_id, message_id_hdr)) VIRTUAL,
   UNIQUE(account_id, gmail_id),
   UNIQUE(account_id, message_id_hdr)
 );
 CREATE INDEX IF NOT EXISTS idx_messages_list ON messages(account_id, folder, date DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_date ON messages(account_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(account_id, thread_id);
+CREATE INDEX IF NOT EXISTS idx_messages_thread_key ON messages(account_id, thread_key, date DESC);
 CREATE INDEX IF NOT EXISTS idx_messages_body_codec ON messages(body_codec);
 CREATE INDEX IF NOT EXISTS idx_messages_body_missing ON messages(account_id, date DESC)
   WHERE body_state = 'missing';
@@ -127,7 +129,7 @@ CREATE INDEX IF NOT EXISTS idx_ops_due ON ops(state, next_attempt_at);
  * previous version; the CREATE ... IF NOT EXISTS block above describes the
  * current shape for fresh databases.
  */
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 4
 
 /** Contentless-delete FTS5 tables need this SQLite or newer */
 const MIN_SQLITE = [3, 43, 0]
@@ -136,8 +138,9 @@ function hasTable(db: Database.Database, name: string): boolean {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)
 }
 
+/** Column names including generated (hidden) ones */
 function columnNames(db: Database.Database, table: string): string[] {
-  return (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name)
+  return (db.prepare(`PRAGMA table_xinfo(${table})`).all() as { name: string }[]).map((c) => c.name)
 }
 
 /** Throws when the linked SQLite is too old for the schema */
@@ -232,6 +235,17 @@ const MIGRATIONS: Record<number, (db: Database.Database) => void> = {
     for (const r of compressed) {
       insert.run(r.id, r.subject, decodeBody(r.body_text, r.body_codec) ?? '')
     }
+  },
+  // v3 → v4: the conversation key every list groups by, as a virtual generated
+  // column (Gmail's thread id, else the Message-ID for local mail), indexed
+  // with the date so thread aggregates and paging read one index range.
+  4: (db) => {
+    if (!hasTable(db, 'messages')) return
+    if (!columnNames(db, 'messages').includes('thread_key')) {
+      db.exec(
+        'ALTER TABLE messages ADD COLUMN thread_key TEXT GENERATED ALWAYS AS (COALESCE(thread_id, message_id_hdr)) VIRTUAL'
+      )
+    }
   }
 }
 
@@ -299,6 +313,11 @@ function maybeVacuum(afterMigration: boolean): void {
 
 function mb(bytes: number): string {
   return (bytes / 1_048_576).toFixed(1)
+}
+
+/** The open connection, for query modules that live outside this file */
+export function connection(): Database.Database {
+  return db
 }
 
 export function closeDb(): void {
@@ -754,15 +773,15 @@ export function listMissingBodyIds(accountId: string, limit: number): string[] {
   ).map((r) => r.gmail_id)
 }
 
-/** Gmail ids of metadata-only rows in one thread (fetched on open) */
-export function listMissingBodyIdsInThread(accountId: string, threadId: string): string[] {
+/** Gmail ids of metadata-only rows in one conversation (fetched on open) */
+export function listMissingBodyIdsInThread(accountId: string, threadKey: string): string[] {
   return (
     db
       .prepare(
         `SELECT gmail_id FROM messages
-         WHERE account_id = ? AND thread_id = ? AND body_state = 'missing' AND gmail_id IS NOT NULL`
+         WHERE account_id = ? AND thread_key = ? AND body_state = 'missing' AND gmail_id IS NOT NULL`
       )
-      .all(accountId, threadId) as { gmail_id: string }[]
+      .all(accountId, threadKey) as { gmail_id: string }[]
   ).map((r) => r.gmail_id)
 }
 
@@ -831,6 +850,7 @@ interface MessageRow {
   gmail_id: string | null
   gmail_draft_id: string | null
   thread_id: string | null
+  thread_key: string | null
   message_id_hdr: string | null
   in_reply_to: string | null
   refs: string
@@ -862,6 +882,7 @@ function rowToWire(row: MessageRow): WireMessage {
     accountId: row.account_id,
     gmailId: row.gmail_id,
     threadId: row.thread_id,
+    threadKey: row.thread_key ?? row.message_id_hdr ?? `row:${row.gmail_id}`,
     messageIdHdr: row.message_id_hdr,
     inReplyTo: row.in_reply_to,
     references: JSON.parse(row.refs),
@@ -921,12 +942,34 @@ export function getMessageWire(accountId: string, gmailId: string): WireMessage 
   return row ? rowToWire(row) : null
 }
 
-export function queryThread(accountId: string, threadId: string): WireMessage[] {
+/** Every message in a conversation, oldest first */
+export function queryThread(accountId: string, threadKey: string): WireMessage[] {
   return (
     db
-      .prepare('SELECT * FROM messages WHERE account_id = ? AND thread_id = ? ORDER BY date')
-      .all(accountId, threadId) as MessageRow[]
+      .prepare('SELECT * FROM messages WHERE account_id = ? AND thread_key = ? ORDER BY date, id')
+      .all(accountId, threadKey) as MessageRow[]
   ).map(rowToWire)
+}
+
+/** Drafts, newest first (shown as individual messages, not conversations) */
+export function listDraftMessages(accountId: string | null): WireMessage[] {
+  return (
+    db
+      .prepare(
+        `SELECT * FROM messages
+         WHERE folder = 'drafts' AND (@accountId IS NULL OR account_id = @accountId)
+         ORDER BY date DESC LIMIT 500`
+      )
+      .all({ accountId }) as MessageRow[]
+  ).map(rowToWire)
+}
+
+/** One message by its Message-ID header */
+export function getMessageWireByHdr(accountId: string, messageIdHdr: string): WireMessage | null {
+  const row = db
+    .prepare('SELECT * FROM messages WHERE account_id = ? AND message_id_hdr = ?')
+    .get(accountId, messageIdHdr) as MessageRow | undefined
+  return row ? rowToWire(row) : null
 }
 
 /** Optimistic local mirror of a Gmail label action (remote writeback follows) */

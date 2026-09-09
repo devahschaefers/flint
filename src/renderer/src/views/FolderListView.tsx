@@ -4,10 +4,12 @@ import DateSection from '../components/inbox/DateSection'
 import ThreadRow from '../components/inbox/ThreadRow'
 import HeaderControls from '../components/inbox/HeaderControls'
 import { groupByBucket, shortDate } from '../lib/dates'
-import { buildThreads, threadsInFolder, type Thread } from '../lib/threads'
 import { resolveMailbox, resolveNames } from '../lib/identity'
-import { filterByAccount, useAppStore, type FolderView } from '../store'
+import { useMailQuery, useReachBottom, useThreadPages } from '../lib/useMailQuery'
+import { wireToMessage } from '../lib/wire'
+import { accountScope, useAppStore, type FolderView } from '../store'
 import type { Contact, Message } from '../data/types'
+import type { ThreadListView, WireThread } from '../../../preload/index.d'
 import { cn } from '../lib/utils'
 import {
   ContextMenu,
@@ -25,6 +27,8 @@ const FOLDER_TITLES: Record<FolderView, string> = {
   archive: 'Archive'
 }
 
+const isoDate = (t: WireThread): string => new Date(t.latestDateMs).toISOString()
+
 interface DraftRowProps {
   draft: Message
   contacts: Contact[]
@@ -37,7 +41,6 @@ function DraftRow({ draft, contacts, onClick, onDelete }: DraftRowProps): React.
   const recipient = draft.to[0]
   const resolved = recipient ? resolveMailbox(recipient, contacts) : null
   const name = draft.to.length > 0 ? resolveNames(draft.to, contacts) : '(no recipient)'
-
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -72,43 +75,94 @@ function DraftRow({ draft, contacts, onClick, onDelete }: DraftRowProps): React.
   )
 }
 
+function DraftsList({ scope }: { scope: string | null }): React.JSX.Element {
+  const contacts = useAppStore((s) => s.contacts)
+  const openCompose = useAppStore((s) => s.openCompose)
+  const deleteDraft = useAppStore((s) => s.deleteDraft)
+  const { data, loading } = useMailQuery(() => window.api.listDrafts(scope), [scope])
+  const drafts = useMemo(() => (data ?? []).map(wireToMessage), [data])
+  if (drafts.length === 0) {
+    return loading ? (
+      <></>
+    ) : (
+      <div className="flex h-[40%] items-end justify-center">
+        <span className="text-[13px] text-text-muted">Nothing in Drafts</span>
+      </div>
+    )
+  }
+  return (
+    <>
+      {groupByBucket(drafts, (m) => m.date).map(([bucket, items], i) => (
+        <div key={bucket}>
+          <DateSection
+            label={bucket}
+            className={cn('pl-[10px] mb-1.5', i === 0 ? 'mt-2' : 'mt-5')}
+          />
+          {items.map((draft) => (
+            <DraftRow
+              key={draft.messageId}
+              draft={draft}
+              contacts={contacts}
+              onClick={() => openCompose(draft)}
+              onDelete={() => deleteDraft(draft)}
+            />
+          ))}
+        </div>
+      ))}
+    </>
+  )
+}
+
+function ThreadList({
+  scope,
+  view,
+  title
+}: {
+  scope: string | null
+  view: ThreadListView
+  title: string
+}): React.JSX.Element {
+  const openThread = useAppStore((s) => s.openThread)
+  const pages = useThreadPages(scope, view)
+  const sentinel = useReachBottom(pages.loadMore, pages.hasMore)
+  return (
+    <>
+      {pages.threads.length === 0 && !pages.loading ? (
+        <div className="flex h-[40%] items-end justify-center">
+          <span className="text-[13px] text-text-muted">Nothing in {title}</span>
+        </div>
+      ) : (
+        groupByBucket(pages.threads, isoDate).map(([bucket, items], i) => (
+          <div key={bucket}>
+            <DateSection
+              label={bucket}
+              className={cn('pl-[10px] mb-1.5', i === 0 ? 'mt-2' : 'mt-5')}
+            />
+            {items.map((thread) => (
+              <ThreadRow
+                key={`${thread.accountId}:${thread.threadKey}`}
+                thread={thread}
+                onClick={() => openThread(thread)}
+              />
+            ))}
+          </div>
+        ))
+      )}
+      <div ref={sentinel} className="h-px" />
+    </>
+  )
+}
+
 interface FolderListViewProps {
   folder: FolderView
 }
 
 export default function FolderListView({ folder }: FolderListViewProps): React.JSX.Element {
-  const messages = useAppStore((s) => s.messages)
-  const contacts = useAppStore((s) => s.contacts)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
-  const openThread = useAppStore((s) => s.openThread)
-  const openCompose = useAppStore((s) => s.openCompose)
-  const deleteDraft = useAppStore((s) => s.deleteDraft)
-
+  const scope = accountScope(activeAccountId)
   const title = FOLDER_TITLES[folder]
-  const accountMessages = useMemo(
-    () => filterByAccount(messages, activeAccountId),
-    [messages, activeAccountId]
-  )
-  const threads = useMemo(() => buildThreads(accountMessages), [accountMessages])
-
-  const isDrafts = folder === 'drafts'
-
-  /** Drafts render as individual messages; every other list renders threads. */
-  const drafts = isDrafts
-    ? [...accountMessages.filter((m) => m.folder === 'drafts')].sort((a, b) =>
-        b.date.localeCompare(a.date)
-      )
-    : []
-  const list: Thread[] = isDrafts
-    ? []
-    : folder === 'pins'
-      ? // Pinned conversations, excluding ones sitting in Trash/Spam
-        threads.filter(
-          (t) => t.flagged && !t.messages.some((m) => m.folder === 'trash' || m.folder === 'spam')
-        )
-      : threadsInFolder(threads, folder)
-
-  const empty = isDrafts ? drafts.length === 0 : list.length === 0
+  const view: ThreadListView | null =
+    folder === 'drafts' ? null : folder === 'pins' ? { kind: 'pins' } : { kind: 'folder', folder }
 
   return (
     <motion.div
@@ -121,45 +175,14 @@ export default function FolderListView({ folder }: FolderListViewProps): React.J
         <div className="no-drag flex items-center">
           <span className="text-[15px] font-semibold text-text-primary">{title}</span>
         </div>
-
         <HeaderControls showDoneToggle={folder !== 'archive'} />
       </div>
 
       <div className="flex-1 overflow-y-auto px-[30px] pb-6">
-        {empty ? (
-          <div className="flex h-[40%] items-end justify-center">
-            <span className="text-[13px] text-text-muted">Nothing in {title}</span>
-          </div>
-        ) : isDrafts ? (
-          groupByBucket(drafts, (m) => m.date).map(([bucket, items], i) => (
-            <div key={bucket}>
-              <DateSection
-                label={bucket}
-                className={cn('pl-[10px] mb-1.5', i === 0 ? 'mt-2' : 'mt-5')}
-              />
-              {items.map((draft) => (
-                <DraftRow
-                  key={draft.messageId}
-                  draft={draft}
-                  contacts={contacts}
-                  onClick={() => openCompose(draft.messageId)}
-                  onDelete={() => deleteDraft(draft.messageId)}
-                />
-              ))}
-            </div>
-          ))
+        {view ? (
+          <ThreadList key={JSON.stringify(view)} scope={scope} view={view} title={title} />
         ) : (
-          groupByBucket(list, (t) => t.latest.date).map(([bucket, items], i) => (
-            <div key={bucket}>
-              <DateSection
-                label={bucket}
-                className={cn('pl-[10px] mb-1.5', i === 0 ? 'mt-2' : 'mt-5')}
-              />
-              {items.map((thread) => (
-                <ThreadRow key={thread.id} thread={thread} onClick={() => openThread(thread.id)} />
-              ))}
-            </div>
-          ))
+          <DraftsList scope={scope} />
         )}
       </div>
     </motion.div>

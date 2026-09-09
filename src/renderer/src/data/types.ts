@@ -53,6 +53,8 @@ export interface Message {
   gmailId?: string
   /** Provider conversation id; when present it overrides References-based threading */
   threadId?: string
+  /** The conversation key main groups by: the provider thread id, else this Message-ID */
+  threadKey: string
 
   // client-side state (not wire headers)
   accountId: string

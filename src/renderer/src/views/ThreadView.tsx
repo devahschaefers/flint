@@ -3,17 +3,20 @@ import { motion } from 'motion/react'
 import { ArrowLeft, Check, ImageOff, Pin } from 'lucide-react'
 import { shortDate } from '../lib/dates'
 import { sanitizeMailHtml } from '../lib/sanitizeMail'
-import { buildThreads } from '../lib/threads'
+import { normalizeSubject } from '../lib/threads'
 import { resolveMailbox, resolveNames } from '../lib/identity'
+import { useMailQuery } from '../lib/useMailQuery'
+import { wireToMessage } from '../lib/wire'
 import { isOwnAddress, useAppStore } from '../store'
 import { cn } from '../lib/utils'
 import HeaderControls from '../components/inbox/HeaderControls'
 import SendStatus from '../components/inbox/SendStatus'
 import ReplyComposer from '../components/compose/ReplyComposer'
 import type { Contact, Message } from '../data/types'
+import type { ThreadRef } from '../../../preload/index.d'
 
 interface ThreadViewProps {
-  threadId: string
+  threadRef: ThreadRef
 }
 
 interface MessageBlockProps {
@@ -84,7 +87,12 @@ function MessageBlock({ message, contacts, isDraft }: MessageBlockProps): React.
           <span className="text-[13px] font-semibold text-text-primary">
             {own ? 'You' : resolved.name}
             {isDraft && <span className="ml-2 text-[11px] font-semibold text-red-3">Draft</span>}
-            <SendStatus message={message} withActions className="ml-2 align-middle" />
+            <SendStatus
+              state={message.state}
+              sendError={message.sendError}
+              message={message}
+              className="ml-2 align-middle"
+            />
           </span>
           <span className="truncate text-[12px] text-text-secondary">{message.from.address}</span>
           <span className="truncate text-[11px] text-text-muted">
@@ -143,27 +151,54 @@ function CollapsedMessage({
   )
 }
 
-export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Element | null {
-  const messages = useAppStore((s) => s.messages)
+/**
+ * One conversation, fetched whole from main when opened (bodies included,
+ * pulled from Gmail first if they were still missing) and re-fetched on every
+ * mail change so replies and state badges stay current.
+ */
+export default function ThreadView({ threadRef }: ThreadViewProps): React.JSX.Element | null {
   const contacts = useAppStore((s) => s.contacts)
   const back = useAppStore((s) => s.back)
-  const toggleArchiveThread = useAppStore((s) => s.toggleArchiveThread)
-  const toggleFlagged = useAppStore((s) => s.toggleFlagged)
+  const threadAction = useAppStore((s) => s.threadAction)
   const openCompose = useAppStore((s) => s.openCompose)
 
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(new Set())
 
-  const thread = useMemo(
-    () => buildThreads(messages).find((t) => t.id === threadId),
-    [messages, threadId]
+  const { data } = useMailQuery(
+    () => window.api.getThread(threadRef),
+    [threadRef.accountId, threadRef.threadKey]
+  )
+  const messages = useMemo(
+    () => (data ?? []).map(wireToMessage).sort((a, b) => a.date.localeCompare(b.date)),
+    [data]
   )
 
-  if (!thread) return null
+  if (messages.length === 0) {
+    // Loading, or the conversation vanished (deleted elsewhere) — keep the chrome
+    return (
+      <div className="relative h-full flex flex-col">
+        <div className="drag-region flex items-center justify-between px-[30px] pt-[40px] pb-2">
+          <button
+            aria-label="Back"
+            title="Back"
+            onClick={back}
+            className="no-drag flex h-[28px] w-[34px] items-center justify-center rounded-[8px] bg-elevation-2 text-text-bright transition-colors hover:text-ink"
+          >
+            <ArrowLeft size={15} />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const latest = messages[messages.length - 1]
+  const subject = normalizeSubject(messages[0].subject) || '(no subject)'
+  const flagged = messages.some((m) => m.flags.flagged)
 
   /** Reply targets the latest counterpart; on a pure sent thread, its recipients. */
-  const counterpart = [...thread.messages].reverse().find((m) => !isOwnAddress(m.from.address))
+  const counterpart = [...messages].reverse().find((m) => !isOwnAddress(m.from.address))
   // Mirror sendReply's targeting: Reply-To wins over From when the sender set one
-  const replyMailbox = counterpart ? (counterpart.replyTo ?? counterpart.from) : thread.latest.to[0]
+  const replyMailbox = counterpart ? (counterpart.replyTo ?? counterpart.from) : latest.to[0]
   const replyName = replyMailbox
     ? (() => {
         const resolved = resolveMailbox(replyMailbox, contacts)
@@ -198,7 +233,7 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
             aria-label="Done"
             title="Done"
             onClick={() => {
-              toggleArchiveThread(threadId)
+              threadAction(threadRef, 'toggleArchive')
               back()
             }}
             className="flex h-[28px] w-[34px] items-center justify-center rounded-r-[8px] bg-elevation-2 text-text-bright transition-colors hover:bg-green-3 hover:text-white"
@@ -209,15 +244,15 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
 
         <div className="no-drag flex items-center gap-4">
           <button
-            aria-label={thread.flagged ? 'Unpin' : 'Pin'}
-            title={thread.flagged ? 'Unpin' : 'Pin'}
-            onClick={() => toggleFlagged(threadId)}
+            aria-label={flagged ? 'Unpin' : 'Pin'}
+            title={flagged ? 'Unpin' : 'Pin'}
+            onClick={() => threadAction(threadRef, 'toggleFlagged')}
             className={cn(
               'transition-colors duration-150',
-              thread.flagged ? 'text-yellow-3' : 'text-text-bright hover:text-ink'
+              flagged ? 'text-yellow-3' : 'text-text-bright hover:text-ink'
             )}
           >
-            <Pin size={19} strokeWidth={1.8} fill={thread.flagged ? 'currentColor' : 'none'} />
+            <Pin size={19} strokeWidth={1.8} fill={flagged ? 'currentColor' : 'none'} />
           </button>
           <HeaderControls />
         </div>
@@ -226,12 +261,12 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[860px] px-[30px] pt-6 pb-28">
           <h1 className="select-text text-[20px] font-semibold leading-snug text-text-primary">
-            {thread.subject}
+            {subject}
           </h1>
 
           <div className="mt-5">
-            {thread.messages.map((message, i) => {
-              const alwaysExpanded = thread.messages.length <= 2 || i >= thread.messages.length - 2
+            {messages.map((message, i) => {
+              const alwaysExpanded = messages.length <= 2 || i >= messages.length - 2
               const expanded = alwaysExpanded || expandedIds.has(message.messageId)
               const isDraft = message.folder === 'drafts'
               return (
@@ -243,7 +278,7 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
                       <div
                         role="button"
                         title="Edit draft"
-                        onClick={() => openCompose(message.messageId)}
+                        onClick={() => openCompose(message)}
                         className="-mx-3 cursor-pointer rounded-[10px] px-3 py-2 transition-colors hover:bg-elevation-1"
                       >
                         <MessageBlock message={message} contacts={contacts} isDraft />
@@ -266,7 +301,7 @@ export default function ThreadView({ threadId }: ThreadViewProps): React.JSX.Ele
       </div>
 
       <div className="absolute bottom-[22px] left-1/2 w-[calc(100%-60px)] max-w-[860px] -translate-x-1/2">
-        <ReplyComposer threadId={threadId} replyLabel={replyLabel} />
+        <ReplyComposer thread={messages} replyLabel={replyLabel} />
       </div>
     </motion.div>
   )

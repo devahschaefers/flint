@@ -1,7 +1,16 @@
 import { BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
-import type { GoogleConfig, LocalMessageInput, MailAction, WireMailbox } from '../preload/index.d'
+import type {
+  GoogleConfig,
+  LocalMessageInput,
+  MailAction,
+  ThreadAction,
+  ThreadListView,
+  ThreadQuery,
+  ThreadRef,
+  WireMailbox
+} from '../preload/index.d'
 
 /**
  * Runtime checks for everything that crosses the IPC boundary. TypeScript only
@@ -176,4 +185,96 @@ export function asLocalMessageInput(v: unknown, name = 'input'): LocalMessageInp
     if (val !== undefined) out[key] = val
   }
   return out
+}
+
+// ---------- thread queries ----------
+
+/** A string, or null/undefined meaning "all accounts" */
+export function asNullableString(v: unknown, name: string): string | null {
+  if (v === null || v === undefined) return null
+  return asString(v, name)
+}
+
+export function asThreadRef(v: unknown, name: string): ThreadRef {
+  const o = asObject(v, name)
+  return {
+    accountId: asString(o.accountId, `${name}.accountId`),
+    threadKey: asString(o.threadKey, `${name}.threadKey`)
+  }
+}
+
+export function asThreadRefs(v: unknown, name: string): ThreadRef[] {
+  if (!Array.isArray(v)) throw new Error(`${name} must be an array`)
+  if (v.length > 500) throw new Error(`${name} must hold at most 500 threads`)
+  return v.map((item, i) => asThreadRef(item, `${name}[${i}]`))
+}
+
+const THREAD_ACTIONS: readonly ThreadAction[] = [
+  'toggleArchive',
+  'archive',
+  'toggleFlagged',
+  'toggleSeen',
+  'markSeen',
+  'trash',
+  'spam',
+  'inbox'
+]
+
+export function asThreadAction(v: unknown, name: string): ThreadAction {
+  if (typeof v !== 'string' || !(THREAD_ACTIONS as readonly string[]).includes(v)) {
+    throw new Error(`${name} must be one of ${THREAD_ACTIONS.join(', ')}`)
+  }
+  return v as ThreadAction
+}
+
+const LIST_FOLDERS = ['archive', 'sent', 'trash', 'spam'] as const
+
+function asThreadListView(v: unknown, name: string): ThreadListView {
+  const o = asObject(v, name)
+  switch (o.kind) {
+    case 'inbox': {
+      const view: ThreadListView = {
+        kind: 'inbox',
+        includeArchived: asBoolean(o.includeArchived, `${name}.includeArchived`)
+      }
+      const category = asNullableString(o.category, `${name}.category`)
+      if (category !== null) view.category = category
+      const importantOnly = asOptionalBoolean(o.importantOnly, `${name}.importantOnly`)
+      if (importantOnly !== undefined) view.importantOnly = importantOnly
+      return view
+    }
+    case 'folder': {
+      const folder = asString(o.folder, `${name}.folder`)
+      if (!(LIST_FOLDERS as readonly string[]).includes(folder)) {
+        throw new Error(`${name}.folder must be one of ${LIST_FOLDERS.join(', ')}`)
+      }
+      return { kind: 'folder', folder: folder as (typeof LIST_FOLDERS)[number] }
+    }
+    case 'pins':
+      return { kind: 'pins' }
+    default:
+      throw new Error(`${name}.kind must be inbox, folder, or pins`)
+  }
+}
+
+export function asThreadQuery(v: unknown, name = 'query'): ThreadQuery {
+  const o = asObject(v, name)
+  const limit = asFiniteNumber(o.limit, `${name}.limit`)
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    throw new Error(`${name}.limit must be an integer between 1 and 200`)
+  }
+  const query: ThreadQuery = {
+    accountId: asNullableString(o.accountId, `${name}.accountId`),
+    view: asThreadListView(o.view, `${name}.view`),
+    limit
+  }
+  if (o.cursor !== null && o.cursor !== undefined) {
+    const c = asObject(o.cursor, `${name}.cursor`)
+    query.cursor = {
+      latestDateMs: asFiniteNumber(c.latestDateMs, `${name}.cursor.latestDateMs`),
+      accountId: asString(c.accountId, `${name}.cursor.accountId`),
+      threadKey: asString(c.threadKey, `${name}.cursor.threadKey`)
+    }
+  }
+  return query
 }

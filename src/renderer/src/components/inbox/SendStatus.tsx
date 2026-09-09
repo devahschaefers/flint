@@ -1,11 +1,11 @@
 import { AlertCircle, Loader2 } from 'lucide-react'
-import type { Message } from '../../data/types'
+import type { Message, MessageState } from '../../data/types'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store'
 
 /** Compact lifecycle label for a message that hasn't reached Gmail (or failed to) */
-function sendStatusLabel(m: Message): string | null {
-  switch (m.state) {
+function sendStatusLabel(state: MessageState): string | null {
+  switch (state) {
     case 'failed':
       return 'Failed to send'
     case 'queued':
@@ -20,29 +20,31 @@ function sendStatusLabel(m: Message): string | null {
 }
 
 interface SendStatusProps {
-  message: Message
-  /** Show Retry / Edit controls (thread view); list rows stay label-only */
-  withActions?: boolean
+  state: MessageState
+  sendError?: string | null
+  /** The message itself, when Retry / Edit controls should be offered (thread view) */
+  message?: Message
   className?: string
 }
 
 /**
  * Inline badge for outgoing mail in flight: queued (undo window), sending, or
- * failed. Failed messages expose their recovery actions here; the rest is
- * informational.
+ * failed. Failed messages expose their recovery actions when the full message
+ * is at hand; list rows pass state only and stay label-only.
  */
 export default function SendStatus({
+  state,
+  sendError,
   message,
-  withActions = false,
   className
 }: SendStatusProps): React.JSX.Element | null {
   const retrySend = useAppStore((s) => s.retrySend)
   const revertToDraft = useAppStore((s) => s.revertToDraft)
   const openCompose = useAppStore((s) => s.openCompose)
 
-  const label = sendStatusLabel(message)
+  const label = sendStatusLabel(state)
   if (!label) return null
-  const failed = message.state === 'failed'
+  const failed = state === 'failed'
 
   const Icon = failed ? AlertCircle : Loader2
   const tone = failed ? 'text-red-3' : 'text-text-muted'
@@ -50,30 +52,30 @@ export default function SendStatus({
   return (
     <span
       className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold', tone, className)}
-      title={message.sendError ?? undefined}
+      title={sendError ?? undefined}
     >
       <Icon size={11} className={cn(!failed && 'animate-spin')} />
       {label}
-      {withActions && failed && (
+      {message && failed && (
         <>
           <button
-            onClick={() => retrySend(message.messageId)}
+            onClick={() => retrySend(message)}
             className="ml-1 rounded-[5px] bg-elevation-2 px-1.5 py-[1px] text-text-primary transition-colors hover:bg-elevation-3"
           >
             Retry
           </button>
           <button
             onClick={() => {
-              revertToDraft(message.messageId)
-              openCompose(message.messageId)
+              revertToDraft(message)
+              openCompose(message)
             }}
             className="rounded-[5px] bg-elevation-2 px-1.5 py-[1px] text-text-primary transition-colors hover:bg-elevation-3"
           >
             Edit
           </button>
-          {message.sendError && (
-            <span className="ml-1 truncate font-normal text-text-muted" title={message.sendError}>
-              {message.sendError}
+          {sendError && (
+            <span className="ml-1 truncate font-normal text-text-muted" title={sendError}>
+              {sendError}
             </span>
           )}
         </>

@@ -1,11 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'motion/react'
 import { Search, X } from 'lucide-react'
-import type { Mailbox } from '../../data/types'
-import { resolveMailbox } from '../../lib/identity'
-import { buildThreads, threadRootId, type Thread } from '../../lib/threads'
-import { filterByAccount, useAppStore } from '../../store'
+import { useMailQuery } from '../../lib/useMailQuery'
+import { accountScope, useAppStore } from '../../store'
 import ThreadRow from '../inbox/ThreadRow'
+
+const MIN_QUERY = 2
+const DEBOUNCE_MS = 120
+const RESULT_LIMIT = 50
 
 /** Global search across all mail (every folder, archive included). Store-driven. */
 export default function SearchOverlay(): React.JSX.Element | null {
@@ -14,43 +16,35 @@ export default function SearchOverlay(): React.JSX.Element | null {
   return searchOpen ? <SearchPanel /> : null
 }
 
+/** The typed value, settled: only changes once typing pauses */
+function useDebounced(value: string, ms: number): string {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const t = window.setTimeout(() => setSettled(value), ms)
+    return () => window.clearTimeout(t)
+  }, [value, ms])
+  return settled
+}
+
 function SearchPanel(): React.JSX.Element {
   const setSearchOpen = useAppStore((s) => s.setSearchOpen)
   const openThread = useAppStore((s) => s.openThread)
-  const messages = useAppStore((s) => s.messages)
-  const contacts = useAppStore((s) => s.contacts)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
 
   const [query, setQuery] = useState('')
-  const trimmed = query.trim()
+  const trimmed = useDebounced(query.trim(), DEBOUNCE_MS)
+  const scope = accountScope(activeAccountId)
 
-  // Match subject, body, and every address/name a message carries — including the
-  // resolved contact name, so "Mom" finds mail from linda.schaefers@comcast.net
-  // as well as sent mail addressed to her. Results are whole conversations.
-  const results = useMemo((): Thread[] => {
-    if (trimmed.length < 2) return []
-    const q = trimmed.toLowerCase()
-    const visible = filterByAccount(messages, activeAccountId)
-    const mailboxMatches = (m: Mailbox): boolean =>
-      m.address.toLowerCase().includes(q) ||
-      (m.name?.toLowerCase().includes(q) ?? false) ||
-      resolveMailbox(m, contacts).name.toLowerCase().includes(q)
-    const rootIds = new Set<string>()
-    for (const message of visible) {
-      if (
-        message.subject.toLowerCase().includes(q) ||
-        message.body.join(' ').toLowerCase().includes(q) ||
-        mailboxMatches(message.from) ||
-        message.to.some(mailboxMatches) ||
-        message.cc.some(mailboxMatches)
-      ) {
-        rootIds.add(threadRootId(message))
-      }
-    }
-    return buildThreads(visible)
-      .filter((t) => rootIds.has(t.id))
-      .slice(0, 50)
-  }, [messages, contacts, activeAccountId, trimmed])
+  // Full-text search over subject and body in main (FTS5, best match first);
+  // results are whole conversations with the best-matching message's snippet.
+  const { data: results, loading } = useMailQuery(
+    () =>
+      trimmed.length < MIN_QUERY
+        ? Promise.resolve([])
+        : window.api.search(trimmed, scope, RESULT_LIMIT),
+    [trimmed, scope]
+  )
+  const list = results ?? []
 
   return (
     // Above the composer (z-[60]) so Cmd+K works while composing; menus are z-[80]
@@ -81,19 +75,20 @@ function SearchPanel(): React.JSX.Element {
         </div>
 
         <div className="overflow-y-auto px-2 py-2">
-          {trimmed.length < 2 ? (
+          {trimmed.length < MIN_QUERY ? (
             <div className="py-8 text-center text-[13px] text-text-muted">Type to search</div>
-          ) : results.length === 0 ? (
+          ) : list.length === 0 && !loading ? (
             <div className="py-8 text-center text-[13px] text-text-muted">
               No results for &ldquo;{trimmed}&rdquo;
             </div>
           ) : (
-            results.map((thread) => (
+            list.map((result) => (
               <ThreadRow
-                key={thread.id}
-                thread={thread}
+                key={`${result.accountId}:${result.threadKey}`}
+                thread={result}
+                preview={result.match.snippet}
                 onClick={() => {
-                  openThread(thread.id)
+                  openThread(result)
                   setSearchOpen(false)
                 }}
               />

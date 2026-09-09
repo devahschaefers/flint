@@ -1,6 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import * as db from './db'
 import { outbox } from './outbox'
+import * as queries from './queries'
 import { syncEngine } from './sync'
 import type { GoogleConfig } from '../preload/index.d'
 import {
@@ -9,11 +10,13 @@ import {
   asGoogleConfig,
   asIdListOrNull,
   asLocalMessageInput,
-  asMailAction,
+  asNullableString,
   asObject,
-  asOptionalBoolean,
   asString,
-  asStringArray,
+  asThreadAction,
+  asThreadQuery,
+  asThreadRef,
+  asThreadRefs,
   assertTrustedSender
 } from './validate'
 
@@ -47,31 +50,59 @@ export function registerIpc(): void {
   handle('accounts:add', () => syncEngine.addAccount())
   handle('accounts:remove', (raw) => syncEngine.removeAccount(asString(raw, 'id')))
 
-  handle('mail:window', (raw) => {
-    const perAccount = asFiniteNumber(raw, 'perAccount')
-    if (perAccount < 0) throw new Error('perAccount must be non-negative')
-    return db.queryWindow(perAccount)
-  })
-  handle('mail:thread', async (raw) => {
+  // ---- reads ----
+  handle('threads:list', (raw) => queries.listThreads(asThreadQuery(raw)))
+  handle('threads:overview', (raw) => {
     const p = asObject(raw, 'params')
-    const accountId = asString(p.accountId, 'accountId')
-    const threadId = asString(p.threadId, 'threadId')
+    return queries.inboxOverview(
+      asNullableString(p.accountId, 'accountId'),
+      asBoolean(p.includeArchived, 'includeArchived')
+    )
+  })
+  handle('threads:get', async (raw) => {
+    const ref = asThreadRef(raw, 'ref')
     // Metadata-only rows get their bodies now; offline, the thread shows what it has
     await syncEngine
-      .ensureBodies(accountId, threadId)
-      .catch((err) => console.warn('[ipc] could not fetch thread bodies:', err))
-    return db.queryThread(accountId, threadId)
+      .ensureBodies(ref.accountId, ref.threadKey)
+      .catch((err) => console.warn('[ipc] body fetch on open failed:', (err as Error).message))
+    return db.queryThread(ref.accountId, ref.threadKey)
   })
-  handle('mail:action', (raw) => {
+  handle('threads:search', (raw) => {
     const p = asObject(raw, 'params')
-    return outbox.applyAction(
+    return queries.searchThreads(
+      asString(p.query, 'query'),
+      asNullableString(p.accountId, 'accountId'),
+      asFiniteNumber(p.limit, 'limit')
+    )
+  })
+  handle('mail:drafts', (raw) => {
+    const p = asObject(raw, 'params')
+    return db.listDraftMessages(asNullableString(p.accountId, 'accountId'))
+  })
+  handle('mail:contacts', (raw) => {
+    const p = asObject(raw, 'params')
+    return queries.listContacts(asNullableString(p.accountId, 'accountId'))
+  })
+  handle('mail:unread', () => queries.unreadCounts())
+  handle('mail:message', (raw) => {
+    const p = asObject(raw, 'params')
+    return db.getMessageWireByHdr(
       asString(p.accountId, 'accountId'),
-      asStringArray(p.gmailIds, 'gmailIds'),
-      asMailAction(p.action, 'action'),
-      asOptionalBoolean(p.value, 'value')
+      asString(p.messageIdHdr, 'messageIdHdr')
     )
   })
 
+  // ---- writes ----
+  handle('threads:action', (raw) => {
+    const p = asObject(raw, 'params')
+    const refs = asThreadRefs(p.refs, 'refs')
+    const action = asThreadAction(p.action, 'action')
+    for (const ref of refs) {
+      for (const resolved of queries.resolveThreadAction(ref, action)) {
+        outbox.applyAction(ref.accountId, resolved.gmailIds, resolved.action, resolved.value)
+      }
+    }
+  })
   handle('mail:draft:save', (raw) => outbox.saveDraft(asLocalMessageInput(raw)))
   handle('mail:local:delete', (raw) => {
     const p = asObject(raw, 'params')

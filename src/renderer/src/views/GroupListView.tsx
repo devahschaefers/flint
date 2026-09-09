@@ -1,35 +1,34 @@
-import { useMemo } from 'react'
 import { motion } from 'motion/react'
 import { ArrowLeft, Check } from 'lucide-react'
 import DateSection from '../components/inbox/DateSection'
 import ThreadRow from '../components/inbox/ThreadRow'
 import HeaderControls from '../components/inbox/HeaderControls'
 import { groupByBucket } from '../lib/dates'
-import { buildThreads, inboxThreads } from '../lib/threads'
-import { filterByAccount, useAppStore } from '../store'
+import { useReachBottom, useThreadPages } from '../lib/useMailQuery'
+import { accountScope, useAppStore } from '../store'
 import { CATEGORY_LABELS, type Category } from '../data/types'
 import { cn } from '../lib/utils'
+import type { WireThread } from '../../../preload/index.d'
 
 interface GroupListViewProps {
   category: Category
 }
 
+const isoDate = (t: WireThread): string => new Date(t.latestDateMs).toISOString()
+
+/** One smart-inbox group opened as a full list */
 export default function GroupListView({ category }: GroupListViewProps): React.JSX.Element {
-  const messages = useAppStore((s) => s.messages)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const hideDone = useAppStore((s) => s.hideDone)
   const openThread = useAppStore((s) => s.openThread)
   const back = useAppStore((s) => s.back)
-  const archiveThreads = useAppStore((s) => s.archiveThreads)
+  const archiveGroup = useAppStore((s) => s.archiveGroup)
 
-  const threads = useMemo(
-    () => buildThreads(filterByAccount(messages, activeAccountId)),
-    [messages, activeAccountId]
-  )
-  const list = inboxThreads(threads, !hideDone).filter(
-    (t) => t.category === category && !t.important
-  )
-  const buckets = groupByBucket(list, (t) => t.latest.date)
+  const scope = accountScope(activeAccountId)
+  const includeArchived = !hideDone
+  const pages = useThreadPages(scope, { kind: 'inbox', includeArchived, category })
+  const sentinel = useReachBottom(pages.loadMore, pages.hasMore)
+  const buckets = groupByBucket(pages.threads, isoDate)
 
   return (
     <motion.div
@@ -51,7 +50,7 @@ export default function GroupListView({ category }: GroupListViewProps): React.J
           <button
             aria-label="Mark all done"
             title="Mark all done"
-            onClick={() => archiveThreads(list.map((t) => t.id))}
+            onClick={() => archiveGroup(scope, category, includeArchived)}
             className="flex h-[28px] w-[34px] items-center justify-center rounded-r-[8px] bg-elevation-2 text-text-bright transition-colors hover:text-ink"
           >
             <Check size={15} />
@@ -65,7 +64,7 @@ export default function GroupListView({ category }: GroupListViewProps): React.J
       </div>
 
       <div className="flex-1 overflow-y-auto px-[30px] pb-6">
-        {list.length === 0 ? (
+        {pages.threads.length === 0 && !pages.loading ? (
           <div className="flex h-[40%] items-end justify-center">
             <span className="text-[13px] text-text-muted">
               Nothing in {CATEGORY_LABELS[category]}
@@ -79,11 +78,16 @@ export default function GroupListView({ category }: GroupListViewProps): React.J
                 className={cn('pl-[10px] mb-1.5', i === 0 ? 'mt-2' : 'mt-5')}
               />
               {items.map((thread) => (
-                <ThreadRow key={thread.id} thread={thread} onClick={() => openThread(thread.id)} />
+                <ThreadRow
+                  key={`${thread.accountId}:${thread.threadKey}`}
+                  thread={thread}
+                  onClick={() => openThread(thread)}
+                />
               ))}
             </div>
           ))
         )}
+        <div ref={sentinel} className="h-px" />
       </div>
     </motion.div>
   )

@@ -1,37 +1,36 @@
-import { useMemo } from 'react'
 import InboxHeader from '../components/inbox/InboxHeader'
 import DateSection from '../components/inbox/DateSection'
 import GroupRow from '../components/inbox/GroupRow'
 import ThreadRow from '../components/inbox/ThreadRow'
 import { groupByBucket } from '../lib/dates'
-import { buildThreads, inboxThreads } from '../lib/threads'
-import { filterByAccount, useAppStore } from '../store'
+import { useMailQuery, useReachBottom, useThreadPages } from '../lib/useMailQuery'
+import { accountScope, useAppStore } from '../store'
 import type { Category } from '../data/types'
+import type { WireThread } from '../../../preload/index.d'
 
-const GROUP_ORDER: Category[] = ['notifications', 'people', 'invites']
+const isoDate = (t: WireThread): string => new Date(t.latestDateMs).toISOString()
 
+/**
+ * The smart inbox: one row per category group (computed by main), then the
+ * important conversations as an infinite-scroll list.
+ */
 export default function SmartInboxView(): React.JSX.Element {
-  const messages = useAppStore((s) => s.messages)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const hideDone = useAppStore((s) => s.hideDone)
   const openThread = useAppStore((s) => s.openThread)
   const openGroup = useAppStore((s) => s.openGroup)
+  const archiveGroup = useAppStore((s) => s.archiveGroup)
   const connected = useAppStore((s) => s.connected)
   const openSettings = useAppStore((s) => s.openSettings)
 
-  const threads = useMemo(
-    () => buildThreads(filterByAccount(messages, activeAccountId)),
-    [messages, activeAccountId]
+  const scope = accountScope(activeAccountId)
+  const includeArchived = !hideDone
+  const overview = useMailQuery(
+    () => window.api.inboxOverview(scope, includeArchived),
+    [scope, includeArchived]
   )
-  const visible = inboxThreads(threads, !hideDone)
-
-  const groups = GROUP_ORDER.map((category) => ({
-    category,
-    threads: visible.filter((t) => t.category === category && !t.important)
-  })).filter((g) => g.threads.length > 0)
-
-  const important = visible.filter((t) => t.important)
-  const buckets = groupByBucket(important, (t) => t.latest.date)
+  const important = useThreadPages(scope, { kind: 'inbox', includeArchived, importantOnly: true })
+  const sentinel = useReachBottom(important.loadMore, important.hasMore)
 
   if (!connected) {
     return (
@@ -53,6 +52,10 @@ export default function SmartInboxView(): React.JSX.Element {
     )
   }
 
+  const groups = overview.data?.groups ?? []
+  const buckets = groupByBucket(important.threads, isoDate)
+  const empty = groups.length === 0 && important.threads.length === 0 && !important.loading
+
   return (
     <div className="relative h-full flex flex-col">
       <InboxHeader />
@@ -61,27 +64,41 @@ export default function SmartInboxView(): React.JSX.Element {
         {groups.map((g) => (
           <GroupRow
             key={g.category}
-            category={g.category}
-            threads={g.threads}
-            onOpen={() => openGroup(g.category)}
+            group={g}
+            onOpen={() => openGroup(g.category as Category)}
+            onArchiveAll={() => archiveGroup(scope, g.category, includeArchived)}
           />
         ))}
         {buckets.map(([bucket, items]) =>
           bucket === 'Today' ? (
             <div key={bucket} className="mt-1">
               {items.map((thread) => (
-                <ThreadRow key={thread.id} thread={thread} onClick={() => openThread(thread.id)} />
+                <ThreadRow
+                  key={`${thread.accountId}:${thread.threadKey}`}
+                  thread={thread}
+                  onClick={() => openThread(thread)}
+                />
               ))}
             </div>
           ) : (
             <div key={bucket}>
               <DateSection label={bucket} className="pl-[50px] mt-5 mb-2" />
               {items.map((thread) => (
-                <ThreadRow key={thread.id} thread={thread} onClick={() => openThread(thread.id)} />
+                <ThreadRow
+                  key={`${thread.accountId}:${thread.threadKey}`}
+                  thread={thread}
+                  onClick={() => openThread(thread)}
+                />
               ))}
             </div>
           )
         )}
+        {empty && (
+          <div className="flex h-[40%] items-end justify-center">
+            <span className="text-[13px] text-text-muted">You&rsquo;re all caught up</span>
+          </div>
+        )}
+        <div ref={sentinel} className="h-px" />
       </div>
     </div>
   )

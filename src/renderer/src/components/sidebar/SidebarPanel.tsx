@@ -168,7 +168,7 @@ export default function SidebarPanel(): React.JSX.Element {
   const setSidebarOpen = useAppStore((s) => s.setSidebarOpen)
   const railItem = useAppStore((s) => s.railItem)
   const setRailItem = useAppStore((s) => s.setRailItem)
-  const messages = useAppStore((s) => s.messages)
+  const unread = useAppStore((s) => s.unread)
   const accounts = useAppStore((s) => s.accounts)
   const activeAccountId = useAppStore((s) => s.activeAccountId)
   const setAccount = useAppStore((s) => s.setAccount)
@@ -183,8 +183,7 @@ export default function SidebarPanel(): React.JSX.Element {
   // Escape handling lives in App.tsx's single ordered handler (search > composer > sidebar > back)
 
   const unreadCount = (accountId: string): number =>
-    messages.filter((m) => m.accountId === accountId && m.folder === 'inbox' && !m.flags.seen)
-      .length
+    unread.find((u) => u.accountId === accountId)?.inboxUnread ?? 0
 
   return (
     <AnimatePresence>

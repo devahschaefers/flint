@@ -1,6 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { GoogleConfig, LocalMessageInput, MailAction, MailApi } from './index.d'
+import type {
+  GoogleConfig,
+  LocalMessageInput,
+  MailApi,
+  ThreadAction,
+  ThreadQuery,
+  ThreadRef
+} from './index.d'
 
 const api: MailApi = {
   getGoogleConfig: () => ipcRenderer.invoke('config:google:get'),
@@ -8,12 +15,21 @@ const api: MailApi = {
   listAccounts: () => ipcRenderer.invoke('accounts:list'),
   addAccount: () => ipcRenderer.invoke('accounts:add'),
   removeAccount: (id: string) => ipcRenderer.invoke('accounts:remove', id),
-  getMailWindow: (perAccount: number) => ipcRenderer.invoke('mail:window', perAccount),
-  getThread: (accountId: string, threadId: string) =>
-    ipcRenderer.invoke('mail:thread', { accountId, threadId }),
-  mailAction: (p: { accountId: string; gmailIds: string[]; action: MailAction; value?: boolean }) =>
-    ipcRenderer.invoke('mail:action', p),
 
+  listThreads: (query: ThreadQuery) => ipcRenderer.invoke('threads:list', query),
+  inboxOverview: (accountId: string | null, includeArchived: boolean) =>
+    ipcRenderer.invoke('threads:overview', { accountId, includeArchived }),
+  getThread: (ref: ThreadRef) => ipcRenderer.invoke('threads:get', ref),
+  search: (query: string, accountId: string | null, limit: number) =>
+    ipcRenderer.invoke('threads:search', { query, accountId, limit }),
+  listDrafts: (accountId: string | null) => ipcRenderer.invoke('mail:drafts', { accountId }),
+  listContacts: (accountId: string | null) => ipcRenderer.invoke('mail:contacts', { accountId }),
+  unreadCounts: () => ipcRenderer.invoke('mail:unread'),
+  getMessage: (accountId: string, messageIdHdr: string) =>
+    ipcRenderer.invoke('mail:message', { accountId, messageIdHdr }),
+
+  threadAction: (refs: ThreadRef[], action: ThreadAction) =>
+    ipcRenderer.invoke('threads:action', { refs, action }),
   saveDraft: (input: LocalMessageInput) => ipcRenderer.invoke('mail:draft:save', input),
   deleteLocalMessage: (accountId: string, messageIdHdr: string) =>
     ipcRenderer.invoke('mail:local:delete', { accountId, messageIdHdr }),

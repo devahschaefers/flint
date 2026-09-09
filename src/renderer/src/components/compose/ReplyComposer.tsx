@@ -8,13 +8,15 @@ import { useAppStore } from '../../store'
 import { useComposeEditor } from './composeEditor'
 import { RichEditorContent } from './RichEditor'
 import Toolbar from './Toolbar'
+import type { Message } from '../../data/types'
 
 type Mode = 'collapsed' | 'open' | 'full'
 
 const TOAST_MS = 2600
 
 interface ReplyComposerProps {
-  threadId: string
+  /** The conversation being replied to (what the thread view has loaded) */
+  thread: Message[]
   replyLabel: string
 }
 
@@ -24,7 +26,7 @@ interface ReplyComposerProps {
  * survives collapse, so an unsent reply is still there when reopened.
  */
 export default function ReplyComposer({
-  threadId,
+  thread,
   replyLabel
 }: ReplyComposerProps): React.JSX.Element {
   const sendReply = useAppStore((s) => s.sendReply)
@@ -66,15 +68,16 @@ export default function ReplyComposer({
   const send = (): void => {
     if (!editor || !editor.getText().trim()) return
     const html = editor.getHTML()
-    const messageId = sendReply(threadId, editor.getText(), html)
+    const messageId = sendReply(thread, editor.getText(), html)
     if (!messageId) return
+    const accountId = thread[0]?.accountId ?? ''
     lastSent.current = { messageId, html }
     editor.commands.clearContent()
     closeComposer()
     showToast('Message sent', () => {
       const sent = lastSent.current
       if (!sent) return
-      unsend(sent.messageId)
+      unsend(accountId, sent.messageId)
       editor.commands.setContent(sent.html)
       setToast(null)
       setMode('open')

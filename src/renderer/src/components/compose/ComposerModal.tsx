@@ -36,8 +36,9 @@ interface InitialFields {
 
 /** Fields for a freshly opened composer, read once from the store at mount */
 function initialFields(draftId: string | null): InitialFields {
-  const { messages, activeAccountId, accounts } = useAppStore.getState()
-  const editing = draftId ? messages.find((m) => m.messageId === draftId) : undefined
+  const { composer, activeAccountId, accounts } = useAppStore.getState()
+  // The opener loaded the draft being edited into the store alongside its id
+  const editing = draftId && composer.draftId === draftId ? composer.draft : null
   if (editing) {
     return {
       to: formatAddressList(editing.to),
@@ -61,9 +62,7 @@ function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Eleme
   const closeCompose = useAppStore((s) => s.closeCompose)
   const contacts = useAppStore((s) => s.contacts)
   const accounts = useAppStore((s) => s.accounts)
-  const draft = useAppStore((s) =>
-    draftId ? s.messages.find((m) => m.messageId === draftId) : undefined
-  )
+  const draft = useAppStore((s) => (draftId ? s.composer.draft : null))
 
   const [initial] = useState(() => initialFields(draftId))
   const [to, setTo] = useState(initial.to)
@@ -99,7 +98,7 @@ function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Eleme
       saveDraft({ to, subject, ...richInput(), accountId, draftId })
     } else {
       // Closing a draft after clearing every field deletes it, like real clients
-      if (draftId) deleteDraft(draftId)
+      if (draft) deleteDraft(draft)
       closeCompose()
     }
   }

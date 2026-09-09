@@ -23,8 +23,9 @@ export interface Thread {
   important: boolean
 }
 
+/** The conversation a message belongs to: the same key main groups lists by */
 export function threadRootId(message: Message): string {
-  return message.threadId ?? message.references[0] ?? message.messageId
+  return message.threadKey
 }
 
 export function normalizeSubject(subject: string): string {

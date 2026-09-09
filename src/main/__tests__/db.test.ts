@@ -163,7 +163,7 @@ describe('initDb migration v1 -> v2', () => {
     db.initDb(path)
     const { version, rows, tables, indexes } = inspect(path)
 
-    expect(version).toBe(3)
+    expect(version).toBe(4)
     expect(rows.map((r) => r.gmail_id)).toEqual(['g1', 'g2', 'g3', 'g4', 'g5'])
     const byGmail = Object.fromEntries(rows.map((r) => [r.gmail_id, r]))
     // duplicate header: kept on the lowest id, nulled on the later copy
@@ -202,7 +202,7 @@ describe('initDb migration v1 -> v2', () => {
     buildV1(path, ['a'], [])
     db.initDb(path)
     const { version, rows } = inspect(path)
-    expect(version).toBe(3)
+    expect(version).toBe(4)
     expect(rows).toEqual([])
     expect(db.listAccounts()).toHaveLength(1)
   })
@@ -220,14 +220,14 @@ describe('initDb migration v1 -> v2', () => {
     db.initDb(path)
     const second = inspect(path)
     expect(second).toEqual(first)
-    expect(second.version).toBe(3)
+    expect(second.version).toBe(4)
   })
 
   it('initializes a fresh database straight to the current version', () => {
     const path = freshPath()
     db.initDb(path)
     const { version, tables, rows } = inspect(path)
-    expect(version).toBe(3)
+    expect(version).toBe(4)
     expect(rows).toEqual([])
     expect(tables).toEqual(expect.arrayContaining(['messages', 'ops', 'accounts', 'config']))
     // The v2 shape: local rows without a Gmail id are allowed

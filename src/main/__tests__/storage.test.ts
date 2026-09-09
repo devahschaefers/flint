@@ -488,7 +488,7 @@ describe('initDb migration v2 -> v3', () => {
 
     db.initDb(path)
 
-    expect(pragma(path, 'user_version')).toBe(3)
+    expect(pragma(path, 'user_version')).toBe(4)
     expect(pragma(path, 'freelist_count')).toBe(0)
     const after = rawRows(path)
     expect(after).toHaveLength(21)
@@ -712,7 +712,7 @@ describe('compactor', () => {
     raw.close()
 
     db.initDb(path)
-    expect(pragma(path, 'user_version')).toBe(3)
+    expect(pragma(path, 'user_version')).toBe(4)
     expect(rawRows(path).every((r) => r.body_codec === 'zstd')).toBe(true)
     expect(db.countIndexed()).toBe(7)
     expect(db.searchMessages('"text 3"')).toHaveLength(1)

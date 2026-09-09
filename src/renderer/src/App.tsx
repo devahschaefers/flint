@@ -72,7 +72,9 @@ export default function App(): React.JSX.Element {
         {view.name === 'inbox' && <SmartInboxView />}
         {view.name === 'group' && <GroupListView category={view.category} />}
         {view.name === 'folder' && <FolderListView folder={view.folder} />}
-        {view.name === 'thread' && <ThreadView key={view.threadId} threadId={view.threadId} />}
+        {view.name === 'thread' && (
+          <ThreadView key={`${view.ref.accountId}:${view.ref.threadKey}`} threadRef={view.ref} />
+        )}
         {view.name === 'settings' && <SettingsView />}
         <OutboxBanner />
       </main>

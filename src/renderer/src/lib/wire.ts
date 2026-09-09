@@ -25,6 +25,7 @@ export function wireToMessage(w: WireMessage): Message {
     bodyHtml: w.bodyHtml ?? undefined,
     gmailId: w.gmailId ?? undefined,
     threadId: w.threadId ?? undefined,
+    threadKey: w.threadKey,
     accountId: w.accountId,
     folder: w.folder,
     flags: { seen: w.seen, flagged: w.flagged, answered: w.answered },
