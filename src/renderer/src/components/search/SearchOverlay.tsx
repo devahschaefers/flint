@@ -12,7 +12,8 @@ import { SearchIcon } from '../ui/icons'
 
 const MIN_QUERY = 2
 const DEBOUNCE_MS = 120
-const RESULT_LIMIT = 30
+/** Few enough that the Actions row stays in view under the list */
+const RESULT_LIMIT = 8
 
 /** ⌘K: full-text search over every folder, keyboard-first, with a compose shortcut. Store-driven. */
 export default function SearchOverlay(): React.JSX.Element | null {

@@ -41,10 +41,15 @@ export function makeMessageId(): string {
   return `<${crypto.randomUUID()}@flint.local>`
 }
 
-/** Is this one of the user's own addresses? (used for sent rendering and reply targeting) */
+/** Lowercased, with a Gmail-style "+tag" dropped from the local part, so aliases match */
+function addressKey(address: string): string {
+  return address.toLowerCase().replace(/\+[^@]*@/, '@')
+}
+
+/** Is this one of the user's own addresses (or a +alias of one)? Used for sent rendering and reply targeting */
 export function isOwnAddress(address: string): boolean {
-  const key = address.toLowerCase()
-  return useAppStore.getState().accounts.some((a) => a.identity.address.toLowerCase() === key)
+  const key = addressKey(address)
+  return useAppStore.getState().accounts.some((a) => addressKey(a.identity.address) === key)
 }
 
 /** Undo window before a reply actually leaves the machine */
