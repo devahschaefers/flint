@@ -5,32 +5,19 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
 
 ## Open
 
-- **High** — The renderer holds at most 1,500 messages per account (`WINDOW_PER_ACCOUNT`).
-  Older inbox mail disappears from lists and search, threads can render incomplete, and
-  thread actions only touch loaded messages. Fix: thread-level queries, actions, and FTS
-  search in main over SQLite; renderer becomes a view. `src/renderer/src/store.ts`,
-  `src/main/db.ts`.
 - **Medium** — Schema migrations run synchronously in `initDb` before any window is shown:
   the v1→v2 table rebuild was ~15 s on a 1 GB database, and v2→v3 adds the FTS build
   (~1.5 s) plus a one-off `VACUUM` of the whole file. A splash/progress window, or running
   migrations off the main thread, would hide it. `src/main/db.ts`.
-- **Medium** — One bad row empties the whole mailbox: `init` awaits `reloadMail`, and if
-  `wireToMessage` throws on any message (seen 2026-09-08 when the storage-layer branch's
-  compactor left zstd blob bodies in the shared `mail.db`, which this main returns as
-  `Uint8Array` so `toParagraphs` calls `.split` on a buffer) the store stays empty and
-  `subscribeOnce` is never reached, so no later `onMailChanged` recovers it. Make the mapping
-  per-row tolerant and subscribe before the first load. `src/renderer/src/store.ts`,
-  `src/renderer/src/lib/wire.ts`. Any build behind schema v3 shows an empty mailbox against the
-  compacted database for this reason.
 - **Medium** — Attachments are skipped entirely; a message with only an attachment looks
   empty. Needs part metadata + on-demand download. `src/main/google/gmail.ts`.
+- **Low** — Every thread-list page aggregates the whole mailbox (GROUP BY over all
+  messages, then filter/sort/limit): 50–100 ms per page on 21k conversations, re-run on each
+  mail change. Fine today; a maintained `threads` table (updated on message writes) is the
+  fix if it grows. `src/main/queries.ts`.
 - **Low** — Full resync after history expiry fetches at most 2,000 newest missing messages
   (`RESYNC_NEW_CAP`); a longer gap leaves holes until the next pass. It also still fetches
   them with `format=full` rather than metadata-first like backfill. `src/main/sync.ts`.
-- **Low** — `queryWindow` still returns full bodies for the newest 1,500 messages per
-  account, which now means decompressing them all on every hydration (tens of MB of HTML
-  per call). Goes away with paged thread queries that fetch bodies per thread.
-  `src/main/db.ts`.
 - **Low** — A build still on schema v2 (any worktree behind main) that opens the shared
   `mail.db` writes `user_version = 2` back and stores new mail as plain TEXT without FTS
   entries; it also reads compacted bodies as raw BLOBs. The next v3 start re-runs the v3
@@ -48,13 +35,15 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
 - **Low** — The IPC sender check's rejection paths (foreign frame / other origin) are
   verified by reading only; nothing in the app can produce such a sender to test against.
   `src/main/validate.ts`.
-- **Low** — A sent thread with no recipients shows the user's own name in the list row.
-  `src/renderer/src/components/inbox/ThreadRow.tsx`.
 - **Low** — The reply composer never shows who it is replying to until sent.
   `src/renderer/src/components/compose/ReplyComposer.tsx`.
 
 ## Fixed
 
+- ~~**High** — The renderer holds at most 1,500 messages per account (`WINDOW_PER_ACCOUNT`). Older inbox mail disappears from lists and search, threads can render incomplete, and thread actions only touch loaded messages. Fix: thread-level queries, actions, and FTS search in main over SQLite; renderer becomes a view. `src/renderer/src/store.ts`, `src/main/db.ts`.~~ Every list is a paged SQLite query answered by main (thread aggregates keyed by `thread_key`), actions address whole conversations, threads load complete on open, and search runs on the FTS index. The renderer holds no mail. `ca811c4`
+- ~~**Medium** — One bad row empties the whole mailbox: `init` awaits `reloadMail`, and if `wireToMessage` throws on any message (seen 2026-09-08 when the storage-layer branch's compactor left zstd blob bodies in the shared `mail.db`, which this main returns as `Uint8Array` so `toParagraphs` calls `.split` on a buffer) the store stays empty and `subscribeOnce` is never reached, so no later `onMailChanged` recovers it. Make the mapping per-row tolerant and subscribe before the first load. `src/renderer/src/store.ts`, `src/renderer/src/lib/wire.ts`. Any build behind schema v3 shows an empty mailbox against the compacted database for this reason.~~ The renderer no longer hydrates rows up front; each view maps only what it shows, and the change subscription is set before the first load. `ca811c4`
+- ~~**Low** — `queryWindow` still returns full bodies for the newest 1,500 messages per account, which now means decompressing them all on every hydration (tens of MB of HTML per call). Goes away with paged thread queries that fetch bodies per thread. `src/main/db.ts`.~~ Lists read no body columns; bodies are decoded only for the thread being viewed. `ca811c4`
+- ~~**Low** — A sent thread with no recipients shows the user's own name in the list row. `src/renderer/src/components/inbox/ThreadRow.tsx`.~~ Rows say "To (no recipient)". `ca811c4`
 - ~~**Medium** — Backfill fetched every message in full (`format=full`), so a mailbox was
   ~1 GB on disk and the first sync took a long time.~~ Metadata-first backfill: phase 1
   stores headers/labels/snippet for every message, phase 2 fills bodies newest first, and
