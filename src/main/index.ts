@@ -44,10 +44,9 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
-    // Center the light cluster on the 72px dark rail strip (the rendered cluster
-    // is ~60px wide, wider than the nominal 52 — measured from screenshots)
-    trafficLightPosition: { x: 7, y: 20 },
-    backgroundColor: '#1F2124',
+    // The lights sit in the window's top-left margin, above the icon strip
+    trafficLightPosition: { x: 20, y: 18 },
+    backgroundColor: '#151515',
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

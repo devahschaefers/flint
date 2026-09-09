@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { motion } from 'motion/react'
 import { useEditorState } from '@tiptap/react'
-import { ChevronDown, X } from 'lucide-react'
 import { formatAddressList, parseAddressList } from '../../lib/address'
 import { resolveMailbox } from '../../lib/identity'
 import { useLatest } from '../../lib/useLatest'
@@ -9,6 +7,7 @@ import { useAppStore } from '../../store'
 import { paragraphsToHtml, useComposeEditor } from './composeEditor'
 import { RichEditorContent } from './RichEditor'
 import Toolbar from './Toolbar'
+import Avatar from '../ui/Avatar'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,7 +15,7 @@ import {
   DropdownMenuTrigger
 } from '../ui/dropdown-menu'
 
-/** Global compose window: opened from HeaderControls (pen) or a draft row. Store-driven. */
+/** New Message: a full screen with one card, opened from the strip (⌘N), a draft, or search. Store-driven. */
 export default function ComposerModal(): React.JSX.Element | null {
   const composer = useAppStore((s) => s.composer)
   if (!composer.open) return null
@@ -48,12 +47,15 @@ function initialFields(draftId: string | null): InitialFields {
     }
   }
   return {
-    to: '',
+    to: composer.prefill?.to ?? '',
     subject: '',
     html: null,
     accountId: activeAccountId !== 'all' ? activeAccountId : (accounts[0]?.id ?? '')
   }
 }
+
+const field =
+  'select-text block h-10 w-full bg-transparent text-[13px] text-strong outline-none placeholder:text-label'
 
 function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Element | null {
   const sendMessage = useAppStore((s) => s.sendMessage)
@@ -105,8 +107,8 @@ function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Eleme
   // The window listener below is attached once; the ref keeps it on the latest closure
   const handleCloseRef = useLatest(handleClose)
 
-  // Escape saves-or-closes exactly like the X button / backdrop. App.tsx's Escape
-  // chain defers to this listener while the composer is open (and preventDefaults
+  // Escape saves-or-closes exactly like the ✕ button. App.tsx's Escape chain
+  // defers to this listener while the composer is open (and preventDefaults
   // when a higher layer like search consumed the key, which skips this handler).
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -136,64 +138,59 @@ function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Eleme
     }
   }
 
+  const fromLabel = (
+    <>
+      <span
+        className="h-2.5 w-2.5 shrink-0 rounded-full"
+        style={{ backgroundColor: fromAccount.color }}
+      />
+      <span className="truncate">{fromAccount.identity.name ?? fromAccount.name}</span>
+      <span className="truncate text-label">· {fromAccount.identity.address}</span>
+    </>
+  )
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center">
-      <div className="absolute inset-0 bg-black/30" onClick={handleClose} />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.15 }}
+    <div className="enter-fade fixed inset-0 z-[60] flex flex-col items-center bg-bg pb-5 pt-7">
+      <div
         onKeyDown={handleKeyDown}
-        className="relative flex max-h-[80vh] w-[680px] flex-col overflow-hidden rounded-[14px] border border-white/10 bg-elevation-1 shadow-[0_10px_60px_0_rgba(0,0,0,0.5)]"
+        className="relative flex min-h-0 w-[720px] max-w-[92%] flex-1 flex-col rounded-[14px] border border-edge bg-panel shadow-[0_24px_70px_rgba(0,0,0,0.55)]"
       >
-        <div className="flex h-11 shrink-0 items-center justify-between px-4">
-          <span className="text-[13px] font-semibold text-text-primary">
+        <div className="flex shrink-0 items-center justify-between px-4 pb-1.5 pt-3.5">
+          <span className="truncate text-[13px] font-semibold text-ink">
             {draft ? draft.subject : 'New Message'}
           </span>
           <button
             aria-label="Close"
+            title="Close (esc)"
             onClick={handleClose}
-            className="text-text-secondary transition-colors duration-150 hover:text-ink"
+            className="text-[13px] text-quiet transition-colors hover:text-ink"
           >
-            <X size={16} />
+            ✕
           </button>
         </div>
 
-        <div className="flex h-10 shrink-0 items-center gap-3 border-b border-white/5 px-4">
-          <span className="text-[13px] text-text-muted">From</span>
-          {draft?.inReplyTo ? (
+        <div className="flex h-10 shrink-0 items-center gap-3 border-b border-line px-4 text-[13px]">
+          <span className="text-label">From</span>
+          {draft?.inReplyTo || accounts.length < 2 ? (
             // A reply draft stays on the account that owns its thread — switching
             // accounts would split the conversation across account filters.
-            <div className="flex items-center gap-2 text-[13px] text-text-primary">
-              <span
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ backgroundColor: fromAccount.color }}
-              />
-              {fromAccount.name}
-              <span className="text-text-muted">· {fromAccount.identity.address}</span>
-            </div>
+            <div className="flex min-w-0 items-center gap-2 text-strong">{fromLabel}</div>
           ) : (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-2 text-[13px] text-text-primary outline-none">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: fromAccount.color }}
-                  />
-                  {fromAccount.name}
-                  <span className="text-text-muted">· {fromAccount.identity.address}</span>
-                  <ChevronDown size={14} className="text-text-muted" />
+                <button className="flex min-w-0 items-center gap-2 text-strong outline-none">
+                  {fromLabel}
+                  <span className="text-[11px] text-label">▾</span>
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
                 {accounts.map((account) => (
                   <DropdownMenuItem key={account.id} onSelect={() => setAccountId(account.id)}>
                     <span
-                      className="h-2.5 w-2.5 rounded-full"
+                      className="h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: account.color }}
                     />
-                    {account.name}
-                    <span className="text-text-muted">· {account.identity.address}</span>
+                    <span className="truncate">{account.name}</span>
                   </DropdownMenuItem>
                 ))}
               </DropdownMenuContent>
@@ -201,15 +198,14 @@ function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Eleme
           )}
         </div>
 
-        <div className="shrink-0 border-b border-white/5 px-4">
-          <div className="flex h-10 items-center">
-            <input
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="To"
-              className="select-text flex-1 bg-transparent text-[13px] text-text-primary outline-none placeholder:text-text-muted"
-            />
-          </div>
+        <div className="shrink-0 border-b border-line px-4">
+          <input
+            autoFocus={!initial.to}
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            placeholder="To"
+            className={field}
+          />
           {recipients.length > 0 && (
             <div className="flex flex-wrap gap-1.5 pb-2.5">
               {recipients.map((mailbox, i) => {
@@ -217,12 +213,10 @@ function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Eleme
                 return (
                   <span
                     key={`${mailbox.address}-${i}`}
-                    className="flex items-center gap-1.5 rounded-full bg-elevation-2 py-[3px] pl-2 pr-2.5 text-[11px] text-text-secondary"
+                    title={mailbox.address}
+                    className="flex items-center gap-1.5 rounded-full bg-line py-[3px] pl-1.5 pr-2.5 text-[11px] text-bright"
                   >
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: identity.color }}
-                    />
+                    <Avatar initials={identity.initials} color={identity.color} size={16} />
                     {identity.name}
                   </span>
                 )
@@ -231,37 +225,38 @@ function ComposerPanel({ draftId }: { draftId: string | null }): React.JSX.Eleme
           )}
         </div>
 
-        <div className="flex h-10 shrink-0 items-center border-b border-white/5 px-4">
+        <div className="shrink-0 border-b border-line px-4">
           <input
+            autoFocus={!!initial.to}
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
             placeholder="Subject"
-            className="select-text flex-1 bg-transparent text-[13px] text-text-primary outline-none placeholder:text-text-muted"
+            className={field}
           />
         </div>
 
-        <Toolbar editor={editor} className="shrink-0" />
-        <RichEditorContent editor={editor} className="min-h-[220px] flex-1" />
+        <Toolbar editor={editor} className="shrink-0 border-b border-line px-2.5 pb-1 pt-2" />
+        <RichEditorContent editor={editor} className="min-h-[180px] flex-1 pt-1.5" />
 
-        <div className="flex h-14 shrink-0 items-center gap-3 px-4">
+        <div className="flex shrink-0 items-center gap-3.5 border-t border-line px-4 pb-4 pt-3">
           <button
             onClick={handleSend}
             disabled={!canSend}
-            className="h-8 rounded-[8px] bg-blue-4 px-5 text-[13px] font-semibold text-white transition-colors duration-150 hover:bg-blue-3 disabled:opacity-40"
+            className="rounded-[8px] bg-accent px-[18px] py-[7px] text-[13px] font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-40 disabled:hover:bg-accent"
           >
             Send
           </button>
           <button
             onClick={() => saveDraft({ to, subject, ...richInput(), accountId, draftId })}
             disabled={!hasContent}
-            className="text-[13px] text-text-secondary transition-colors duration-150 hover:text-ink disabled:opacity-40 disabled:hover:text-text-secondary"
+            className="rounded-[6px] px-2 py-1 text-[12.5px] text-quiet transition-colors hover:bg-line-strong hover:text-body disabled:opacity-40 disabled:hover:bg-transparent"
           >
             Save draft
           </button>
           <span className="flex-1" />
-          <span className="text-[11px] text-text-muted"># heading · / commands · ⌘↵ send</span>
+          <span className="text-[11px] text-hint"># heading · / commands · ⌘↵ send</span>
         </div>
-      </motion.div>
+      </div>
     </div>
   )
 }

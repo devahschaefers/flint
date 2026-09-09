@@ -40,14 +40,17 @@ export function groupByBucket<T>(items: T[], getDate: (item: T) => string): [Dat
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
-/** "12:45" for today, otherwise "Aug 26" like Spark's list rows. */
+/** "2:32 PM" today, then "Mon" for the last six days, then "Sep 2", then "Sep 2, 2025". */
 export function shortDate(iso: string, now: Date = new Date()): string {
   const t = new Date(iso)
   if (startOfDay(t) === startOfDay(now)) {
     const h = t.getHours()
     const m = t.getMinutes().toString().padStart(2, '0')
-    return `${h}:${m}`
+    return `${h % 12 || 12}:${m} ${h < 12 ? 'AM' : 'PM'}`
   }
-  return `${MONTHS[t.getMonth()]} ${t.getDate()}`
+  if (startOfDay(t) >= daysBefore(now, 6)) return WEEKDAYS[t.getDay()]
+  if (t.getFullYear() === now.getFullYear()) return `${MONTHS[t.getMonth()]} ${t.getDate()}`
+  return `${MONTHS[t.getMonth()]} ${t.getDate()}, ${t.getFullYear()}`
 }

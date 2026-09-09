@@ -1,16 +1,6 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { EditorContent, type Editor } from '@tiptap/react'
 import { BubbleMenu } from '@tiptap/react/menus'
-import {
-  Bold,
-  Code,
-  Heading2,
-  Image as ImageIcon,
-  Italic,
-  List,
-  Quote,
-  Underline
-} from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { insertImagePlaceholder, promptForLink } from './composeEditor'
 
@@ -20,7 +10,7 @@ import { insertImagePlaceholder, promptForLink } from './composeEditor'
  * The TipTap instance itself comes from `useComposeEditor` in composeEditor.ts.
  */
 
-/** 26px hover chip used by every editor toolbar (mousedown keeps the selection) */
+/** Text chip used by every editor toolbar (mousedown keeps the selection) */
 export function EditorChip({
   title,
   onCmd,
@@ -40,7 +30,7 @@ export function EditorChip({
         onCmd()
       }}
       className={cn(
-        'flex h-[24px] min-w-[26px] items-center justify-center rounded-[5px] px-1 text-text-bright transition-colors hover:bg-white/10 hover:text-ink',
+        'flex h-6 min-w-[26px] items-center justify-center rounded-[5px] px-[7px] leading-none transition-colors hover:bg-white/10 hover:text-ink',
         active && 'bg-white/10 text-ink'
       )}
     >
@@ -52,17 +42,21 @@ export function EditorChip({
 const SLASH_ITEMS = [
   {
     label: 'Heading',
-    icon: Heading2,
+    glyph: 'H1',
     apply: (e: Editor) => e.chain().focus().setHeading({ level: 2 }).run()
   },
   {
     label: 'Bulleted list',
-    icon: List,
+    glyph: '≡',
     apply: (e: Editor) => e.chain().focus().toggleBulletList().run()
   },
-  { label: 'Quote', icon: Quote, apply: (e: Editor) => e.chain().focus().setBlockquote().run() },
-  { label: 'Code block', icon: Code, apply: (e: Editor) => e.chain().focus().setCodeBlock().run() },
-  { label: 'Image', icon: ImageIcon, apply: insertImagePlaceholder }
+  { label: 'Quote', glyph: '❝', apply: (e: Editor) => e.chain().focus().setBlockquote().run() },
+  {
+    label: 'Code block',
+    glyph: '</>',
+    apply: (e: Editor) => e.chain().focus().setCodeBlock().run()
+  },
+  { label: 'Image', glyph: '▣', apply: insertImagePlaceholder }
 ] as const
 
 interface RichEditorContentProps {
@@ -135,74 +129,74 @@ export function RichEditorContent({
         }
       }}
     >
-      <EditorContent editor={editor} className="px-4 pb-2 pt-3" />
+      <EditorContent editor={editor} className="px-4 pb-3.5 pt-2" />
 
       <BubbleMenu editor={editor} options={{ placement: 'top', offset: 8 }}>
-        <div className="flex items-center gap-0.5 rounded-[8px] border border-white/10 bg-elevation-2 p-1 shadow-[0_6px_20px_rgba(0,0,0,0.5)]">
+        <div className="flex items-center gap-0.5 rounded-[8px] border border-edge bg-popover p-1 text-[11px] text-quiet shadow-[0_16px_48px_rgba(0,0,0,0.5)]">
           <EditorChip
             title="Bold"
             active={editor.isActive('bold')}
             onCmd={() => editor.chain().focus().toggleBold().run()}
           >
-            <Bold size={13} />
+            <b>B</b>
           </EditorChip>
           <EditorChip
             title="Italic"
             active={editor.isActive('italic')}
             onCmd={() => editor.chain().focus().toggleItalic().run()}
           >
-            <Italic size={13} />
+            <i className="font-serif">I</i>
           </EditorChip>
           <EditorChip
             title="Underline"
             active={editor.isActive('underline')}
             onCmd={() => editor.chain().focus().toggleUnderline().run()}
           >
-            <Underline size={13} />
+            <u>U</u>
           </EditorChip>
-          <span className="mx-0.5 h-[15px] w-px bg-white/10" />
+          <span className="mx-0.5 h-[14px] w-px bg-edge" />
           <EditorChip
             title="Heading"
             active={editor.isActive('heading', { level: 2 })}
             onCmd={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
           >
-            <span className="text-[11px] font-bold">H1</span>
+            <b>H1</b>
           </EditorChip>
           <EditorChip
             title="Quote"
             active={editor.isActive('blockquote')}
             onCmd={() => editor.chain().focus().toggleBlockquote().run()}
           >
-            <Quote size={13} />
+            ❝
           </EditorChip>
           <EditorChip
             title="Link"
             active={editor.isActive('link')}
             onCmd={() => promptForLink(editor)}
           >
-            <span className="text-[11px] underline">a</span>
+            <u>a</u>
           </EditorChip>
         </div>
       </BubbleMenu>
 
       {slashAt && (
         <div
-          className="fixed z-[80] w-[200px] rounded-[10px] border border-white/10 bg-elevation-2 py-1.5 shadow-[0_10px_30px_rgba(0,0,0,0.55)]"
+          className="enter fixed z-[80] w-[200px] rounded-[10px] border border-edge bg-popover py-2 shadow-[0_16px_48px_rgba(0,0,0,0.5)]"
           style={{ left: slashAt.x, top: slashAt.y }}
         >
-          <div className="px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+          <div className="px-4 pb-1.5 text-[10px] tracking-[0.14em] text-hint uppercase">
             Insert
           </div>
-          {SLASH_ITEMS.map(({ label, icon: Icon, apply }) => (
+          {SLASH_ITEMS.map(({ label, glyph, apply }) => (
             <button
               key={label}
               onMouseDown={(e) => {
                 e.preventDefault()
                 applySlashItem(apply)
               }}
-              className="flex w-full items-center gap-2.5 px-3 py-[7px] text-left text-[12.5px] text-text-primary transition-colors hover:bg-blue-4 hover:text-white"
+              className="flex w-full items-center gap-2.5 px-4 py-[6px] text-left text-[13px] text-muted transition-colors hover:bg-hover-strong hover:text-ink"
             >
-              <Icon size={14} className="shrink-0 opacity-80" />
+              <span className="w-6 shrink-0 text-[11px] text-quiet">{glyph}</span>
               {label}
             </button>
           ))}

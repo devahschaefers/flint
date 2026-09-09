@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useEditorState } from '@tiptap/react'
-import { Maximize2, X } from 'lucide-react'
 import { useLatest } from '../../lib/useLatest'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store'
@@ -12,18 +11,19 @@ import type { Message } from '../../data/types'
 
 type Mode = 'collapsed' | 'open' | 'full'
 
-const TOAST_MS = 2600
-
 interface ReplyComposerProps {
   /** The conversation being replied to (what the thread view has loaded) */
   thread: Message[]
   replyLabel: string
 }
 
+const cornerChip =
+  'flex h-6 w-[26px] items-center justify-center rounded-[5px] text-[11px] text-quiet transition-colors hover:bg-white/10 hover:text-ink'
+
 /**
- * The thread reply UI from the rich-compose handoff: collapsed pill → docked
- * rich composer (auto-grow, drag-resizable) → fullscreen. The editor instance
- * survives collapse, so an unsent reply is still there when reopened.
+ * Three layers at the end of a thread: a quiet pill → a docked rich composer
+ * (auto-grows, drag-resizable) → fullscreen. The editor instance survives
+ * collapse, so an unsent reply is still there when reopened.
  */
 export default function ReplyComposer({
   thread,
@@ -31,15 +31,13 @@ export default function ReplyComposer({
 }: ReplyComposerProps): React.JSX.Element {
   const sendReply = useAppStore((s) => s.sendReply)
   const unsend = useAppStore((s) => s.unsend)
+  const showToast = useAppStore((s) => s.showToast)
   const showWordCount = useAppStore((s) => s.showWordCount)
 
   const [mode, setMode] = useState<Mode>('collapsed')
   const [customHeight, setCustomHeight] = useState<number | null>(null)
-  const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null)
 
   const slashOpenRef = useRef(false)
-  const toastTimer = useRef<number | undefined>(undefined)
-  const lastSent = useRef<{ messageId: string; html: string } | null>(null)
 
   // Read by the once-attached Escape listener below, which must see the current mode
   const modeRef = useLatest(mode)
@@ -54,12 +52,6 @@ export default function ReplyComposer({
   const hasText = (text ?? '').trim().length > 0
   const wordCount = (text ?? '').trim().split(/\s+/).filter(Boolean).length
 
-  const showToast = (text: string, undo?: () => void): void => {
-    window.clearTimeout(toastTimer.current)
-    setToast({ text, undo })
-    toastTimer.current = window.setTimeout(() => setToast(null), TOAST_MS)
-  }
-
   const closeComposer = useCallback((): void => {
     setMode('collapsed')
     setCustomHeight(null)
@@ -71,15 +63,11 @@ export default function ReplyComposer({
     const messageId = sendReply(thread, editor.getText(), html)
     if (!messageId) return
     const accountId = thread[0]?.accountId ?? ''
-    lastSent.current = { messageId, html }
     editor.commands.clearContent()
     closeComposer()
     showToast('Message sent', () => {
-      const sent = lastSent.current
-      if (!sent) return
-      unsend(accountId, sent.messageId)
-      editor.commands.setContent(sent.html)
-      setToast(null)
+      unsend(accountId, messageId)
+      editor.commands.setContent(html)
       setMode('open')
     })
   }
@@ -131,14 +119,13 @@ export default function ReplyComposer({
     window.addEventListener('mouseup', up)
   }
 
-  const cornerChip =
-    'flex h-6 w-[26px] items-center justify-center rounded-[5px] text-text-secondary transition-colors hover:bg-white/10 hover:text-ink'
+  const hint = `${showWordCount && hasText ? `${wordCount} ${wordCount === 1 ? 'word' : 'words'} · ` : ''}# heading · / commands · ⌘↵ send`
 
   const card = (
     <div
       className={cn(
-        'relative flex flex-col overflow-visible rounded-[14px] border border-white/10 bg-elevation-1',
-        full ? 'h-full w-[720px] max-w-[92%]' : 'shadow-[0_4px_15px_rgba(0,0,0,0.25)]'
+        'relative flex flex-col rounded-[14px] border border-edge bg-panel',
+        full ? 'h-full w-[720px] max-w-[92%]' : 'mt-[30px] shadow-[0_4px_15px_rgba(0,0,0,0.25)]'
       )}
     >
       {!full && (
@@ -155,14 +142,14 @@ export default function ReplyComposer({
           className={cornerChip}
           onClick={() => setMode(full ? 'open' : 'full')}
         >
-          <Maximize2 size={12} />
+          {full ? '⤡' : '⤢'}
         </button>
         <button title="Close" className={cornerChip} onClick={closeComposer}>
-          <X size={13} />
+          ✕
         </button>
       </div>
 
-      <Toolbar editor={editor} className="pr-24 pt-2.5" />
+      <Toolbar editor={editor} className="pb-0.5 pl-2.5 pr-20 pt-3" />
 
       <div data-reply-editor className={cn(full && 'flex min-h-0 flex-1 flex-col')}>
         <RichEditorContent
@@ -179,25 +166,22 @@ export default function ReplyComposer({
         />
       </div>
 
-      <div className="flex shrink-0 items-center gap-2.5 border-t border-white/5 px-3.5 py-2.5">
+      <div className="flex shrink-0 items-center gap-3 border-t border-line px-3.5 py-2.5">
         <button
           onClick={send}
           disabled={!hasText}
-          className="h-7 rounded-[7px] bg-blue-4 px-4 text-[12px] font-semibold text-white transition-colors hover:bg-blue-3 disabled:opacity-40 disabled:hover:bg-blue-4"
+          className="rounded-[7px] bg-accent px-4 py-1.5 text-[12px] font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:opacity-40 disabled:hover:bg-accent"
         >
           Send
         </button>
         <button
           onClick={closeComposer}
-          className="px-1.5 text-[12px] text-text-secondary transition-colors hover:text-text-primary"
+          className="rounded-[6px] px-2 py-1 text-[12px] text-quiet transition-colors hover:bg-line-strong hover:text-body"
         >
           Cancel
         </button>
         <span className="flex-1" />
-        <span className="text-[11px] text-text-muted">
-          {showWordCount && hasText ? `${wordCount} ${wordCount === 1 ? 'word' : 'words'} · ` : ''}#
-          heading · / commands · ⌘↵ send
-        </span>
+        <span className="text-[11px] text-hint">{hint}</span>
       </div>
     </div>
   )
@@ -207,14 +191,11 @@ export default function ReplyComposer({
       {mode === 'collapsed' && (
         <button
           onClick={() => setMode('open')}
-          className="flex h-[44px] w-full items-center rounded-[22px] border border-white/10 bg-elevation-1 px-4 text-[13px] text-text-secondary shadow-[0_4px_15px_rgba(0,0,0,0.25)] transition-colors hover:bg-elevation-2"
+          className="mt-9 flex h-11 w-full items-center rounded-[22px] border border-line-strong bg-pill px-4 text-[13px] text-meta shadow-[0_4px_15px_rgba(0,0,0,0.25)] transition-colors hover:bg-[#1e1e1e]"
         >
           {hasText ? (
             <span className="truncate">
-              <span className="mr-1.5 text-[11px] font-semibold uppercase tracking-wide text-yellow-3">
-                Draft
-              </span>
-              {text}
+              <span className="text-warn">Draft</span> — {text}
             </span>
           ) : (
             replyLabel
@@ -224,23 +205,8 @@ export default function ReplyComposer({
       {mode === 'open' && card}
       {full &&
         createPortal(
-          <div className="fixed inset-0 z-[70] flex flex-col items-center bg-elevation-0 pb-6 pt-8">
+          <div className="enter-fade fixed inset-0 z-[70] flex flex-col items-center bg-bg pb-5 pt-7">
             {card}
-          </div>,
-          document.body
-        )}
-      {toast &&
-        createPortal(
-          <div className="fixed bottom-[84px] left-1/2 z-[90] flex -translate-x-1/2 items-center gap-3 rounded-[20px] bg-elevation-2 py-2 pl-4 pr-3 text-[12.5px] text-text-primary shadow-[0_6px_20px_rgba(0,0,0,0.5)]">
-            {toast.text}
-            {toast.undo && (
-              <button
-                onClick={toast.undo}
-                className="font-semibold text-blue-3 transition-colors hover:text-white"
-              >
-                Undo
-              </button>
-            )}
           </div>,
           document.body
         )}

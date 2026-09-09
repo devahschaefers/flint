@@ -1,5 +1,5 @@
-import { AlertTriangle } from 'lucide-react'
 import { useAppStore } from '../../store'
+import { cn } from '../../lib/utils'
 
 /**
  * Surfaces outbox operations that couldn't reach Gmail. Local state keeps the
@@ -25,21 +25,21 @@ export default function OutboxBanner(): React.JSX.Element | null {
 
   return (
     <div
-      className="absolute bottom-4 left-1/2 z-[50] flex -translate-x-1/2 items-center gap-3 rounded-[12px] border border-white/10 bg-elevation-2 py-2 pl-3.5 pr-2.5 text-[12.5px] text-text-primary shadow-[0_6px_20px_rgba(0,0,0,0.5)]"
+      className="enter fixed bottom-[26px] left-1/2 z-[50] flex -translate-x-1/2 items-center gap-3 rounded-[20px] border border-edge bg-hover-strong py-2 pl-4 pr-3 text-[12.5px] text-strong shadow-[0_6px_20px_rgba(0,0,0,0.5)]"
       title={detail}
     >
-      <AlertTriangle size={14} className={parked > 0 ? 'text-red-3' : 'text-yellow-3'} />
+      <span className={cn('h-1.5 w-1.5 rounded-full', parked > 0 ? 'bg-danger' : 'bg-warn')} />
       <span>{summary}</span>
       <button
         onClick={retryOutbox}
-        className="rounded-[7px] bg-blue-4 px-2.5 py-[3px] text-[12px] font-semibold text-white transition-colors hover:bg-blue-3"
+        className="-my-[3px] rounded-[6px] px-2 py-[3px] font-semibold text-accent transition-colors hover:bg-[#2f2f2f] hover:text-ink"
       >
         Retry
       </button>
       <button
         onClick={discardOutbox}
         title="Drop these changes and show what Gmail has"
-        className="px-1.5 text-[12px] text-text-secondary transition-colors hover:text-text-primary"
+        className="-my-[3px] rounded-[6px] px-2 py-[3px] text-quiet transition-colors hover:bg-[#2f2f2f] hover:text-strong"
       >
         Discard
       </button>

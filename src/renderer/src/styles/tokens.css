@@ -1,49 +1,49 @@
 @import 'tailwindcss';
 
 /*
- * Spark Desktop design tokens, extracted from the real app (v3.30.8) via CDP.
- * Naming mirrors Spark's own variables (elevation scale, gray ramp, blue ramp).
+ * Flint design tokens — the "dead simple" language from the design exploration:
+ * one flat ink ground, no chrome, whitespace instead of rules, a single blue
+ * accent, and avatars as the only ornament. Values are lifted from the locked
+ * prototype (Flint Prototype.dc.html).
  */
 @theme {
-  --font-sans: 'Inter', -apple-system, system-ui, 'Segoe UI', sans-serif;
+  --font-sans: 'Helvetica Neue', Helvetica, Arial, sans-serif;
 
-  /* Dark elevation scale */
-  --color-elevation-0: #1f2124;
-  --color-elevation-1: #282a2e;
-  --color-elevation-2: #2f3237;
-  --color-elevation-3: #393e47;
-  --color-elevation-4: #41464e;
+  /* Grounds, darkest to lightest */
+  --color-bg: #151515;
+  --color-pill: #1a1a1a;
+  --color-row: #1b1b1b;
+  --color-panel: #1c1c1c;
+  --color-popover: #1d1d1d;
+  --color-hover: #222222;
+  --color-hover-strong: #242424;
+  --color-line: #262626;
+  --color-line-strong: #2a2a2a;
+  --color-edge: #2e2e2e;
+  --color-off: #333333;
+  --color-stack: #3a3a3a;
 
-  /* Text */
+  /* Text ramp, brightest to faintest */
   --color-ink: #ffffff;
-  --color-text-primary: #dee3eb;
-  --color-text-secondary: #868d97;
-  --color-text-muted: #66707e;
-  --color-text-bright: #aeb8c5;
+  --color-strong: #dddddd;
+  --color-body: #cccccc;
+  --color-bright: #bbbbbb;
+  --color-muted: #aaaaaa;
+  --color-dim: #999999;
+  --color-quiet: #888888;
+  --color-meta: #777777;
+  --color-label: #666666;
+  --color-hint: #555555;
 
-  /* Blue ramp */
-  --color-blue-0: #193350;
-  --color-blue-1: #163c66;
-  --color-blue-2: #0c58a7;
-  --color-blue-3: #1788ff;
-  --color-blue-4: #0070e5;
-  --color-blue-5: #0053cf;
-  --color-accent: #0070e5;
+  /* The one accent */
+  --color-accent: #6f9df0;
+  --color-accent-hover: #8db1f4;
+  --color-accent-light: #9cbcf5;
+  --color-on-accent: #10131a;
 
-  /* Status colors */
-  --color-red-3: #e55c5c;
-  --color-green-3: #42be20;
-  --color-yellow-3: #ffaa3b;
-  --color-purple-3: #a06ad0;
-
-  --ease-out: cubic-bezier(0, 0, 0.2, 1);
-  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Non-utility tokens */
-:root {
-  --sidebar-margin-left: 21px;
-  --rail-width: 72px;
+  /* Status */
+  --color-danger: #e06c6c;
+  --color-warn: #e8b04c;
 }
 
 html,
@@ -53,14 +53,14 @@ body,
 }
 
 body {
-  @apply bg-elevation-0 text-ink font-sans antialiased;
-  font-size: 16px;
+  @apply bg-bg text-strong font-sans antialiased;
+  font-size: 14px;
   overflow: hidden;
   user-select: none;
   cursor: default;
 }
 
-/* The window has no title bar; let empty regions drag it like real Spark */
+/* The window has no title bar; the top band drags it */
 .drag-region {
   -webkit-app-region: drag;
 }
@@ -68,33 +68,71 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/* Scrollbars stay out of the way of the flat ground */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Popovers, cards and overlays fade in from their first frame */
+.enter {
+  transition:
+    opacity 0.15s ease-out,
+    transform 0.15s ease-out;
+  @starting-style {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.enter-fade {
+  transition: opacity 0.15s ease-out;
+  @starting-style {
+    opacity: 0;
+  }
+}
+
 /*
  * Rich message content (.rt) — shared by the compose editors and rendered
- * text/html bodies in the thread view. Values from the rich-compose handoff.
+ * text/html bodies in the thread view.
  */
 .rt {
   font-size: 14px;
-  line-height: 1.65;
-  color: #c6c9cd;
+  line-height: 1.7;
+  color: var(--color-body);
 }
 .rt p {
-  margin-bottom: 12px;
+  margin: 0 0 10px;
+}
+.rt p:last-child {
+  margin-bottom: 0;
 }
 .rt h2 {
   margin: 14px 0 8px;
-  font-size: 19px;
-  font-weight: 700;
-  color: #fff;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-ink);
 }
 .rt h3 {
   margin: 12px 0 6px;
-  font-size: 15.5px;
+  font-size: 15px;
   font-weight: 600;
-  color: #fff;
+  color: var(--color-ink);
 }
 .rt ul,
 .rt ol {
-  margin-bottom: 12px;
+  margin: 0 0 10px;
   padding-left: 22px;
 }
 .rt ul {
@@ -104,36 +142,47 @@ body {
   list-style: decimal;
 }
 .rt blockquote {
-  margin: 0 0 12px;
-  border-left: 3px solid var(--color-blue-4);
+  margin: 0 0 10px;
+  border-left: 2px solid var(--color-accent);
   padding-left: 12px;
-  color: var(--color-text-secondary);
+  color: var(--color-quiet);
 }
 .rt pre {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-line-strong);
   border-radius: 8px;
-  background: #17181b;
+  background: var(--color-bg);
   padding: 10px 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12.5px;
-  color: #c6c9cd;
+  color: var(--color-body);
 }
 .rt strong {
-  color: #fff;
+  color: var(--color-ink);
 }
 .rt a {
-  color: var(--color-blue-3);
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.rt a:hover {
+  color: var(--color-accent-light);
   text-decoration: underline;
 }
+.rt img {
+  max-width: 100%;
+  height: auto;
+}
+.rt table {
+  max-width: 100%;
+}
 .rt .imgph {
-  margin: 0 0 12px;
+  margin: 0 0 10px;
   display: flex;
   height: 110px;
   align-items: center;
   justify-content: center;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border: 1px dashed var(--color-edge);
   border-radius: 8px;
   background: repeating-linear-gradient(
     -45deg,
@@ -142,7 +191,7 @@ body {
     transparent 8px,
     transparent 16px
   );
-  color: var(--color-text-muted);
+  color: var(--color-label);
   font-size: 12px;
 }
 .rt .imgph::after {
@@ -154,11 +203,12 @@ body {
   outline: none;
   user-select: text;
   cursor: text;
+  font-size: 13.5px;
 }
 .rt-editor p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   pointer-events: none;
   float: left;
   height: 0;
-  color: var(--color-text-muted);
+  color: var(--color-meta);
 }

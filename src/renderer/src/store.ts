@@ -10,7 +10,6 @@ import type {
   UnreadCount,
   WireOp
 } from '../../preload/index.d'
-import type { RailItem } from './components/sidebar/IconRail'
 
 /**
  * Renderer state: navigation, accounts, settings, and the small shared bits
@@ -20,7 +19,7 @@ import type { RailItem } from './components/sidebar/IconRail'
  * every `mail:changed` push. Mutations go over IPC and come back the same way.
  */
 
-/** Folder-style lists reachable from the rail/sidebar ('pins' = flagged, not a folder) */
+/** Folder-style lists reachable from the header menu ('pins' = flagged, not a folder) */
 export type FolderView = 'pins' | 'drafts' | 'sent' | 'trash' | 'spam' | 'archive'
 
 export type View =
@@ -29,6 +28,14 @@ export type View =
   | { name: 'folder'; folder: FolderView }
   | { name: 'thread'; ref: ThreadRef }
   | { name: 'settings' }
+
+/** The floating panels summoned from the chrome: the header menu, the account filter */
+export type Popover = 'menu' | 'filter' | null
+
+export interface Toast {
+  text: string
+  undo?: () => void
+}
 
 export function makeMessageId(): string {
   return `<${crypto.randomUUID()}@flint.local>`
@@ -42,6 +49,8 @@ export function isOwnAddress(address: string): boolean {
 
 /** Undo window before a reply actually leaves the machine */
 const UNDO_SEND_MS = 5000
+/** How long a toast stays up */
+const TOAST_MS = 3200
 
 function hasMailApi(): boolean {
   return typeof window.api?.listAccounts === 'function'
@@ -118,11 +127,19 @@ const SETTING_KEYS = {
   showWordCount: 'show_word_count'
 } as const
 
+export interface ComposerState {
+  open: boolean
+  /** The draft being edited, loaded by the opener */
+  draftId: string | null
+  draft: Message | null
+  /** Fields for a fresh message (search's "Compose to …") */
+  prefill: { to: string } | null
+}
+
 interface AppState {
   view: View
   prevView: View | null
-  railItem: RailItem
-  sidebarOpen: boolean
+  popover: Popover
   activeAccountId: string
   accounts: Account[]
   /** True once at least one account is connected */
@@ -136,11 +153,10 @@ interface AppState {
   /** When true (default) archived threads are hidden from the inbox lists */
   hideDone: boolean
   searchOpen: boolean
-  /** The compose window; `draft` is the message being edited, loaded by the opener */
-  composer: { open: boolean; draftId: string | null; draft: Message | null }
+  composer: ComposerState
   signature: string
   showWordCount: boolean
-  refreshCount: number
+  toast: Toast | null
 
   /** Hydrate accounts and settings from main (empty state when no account) */
   init: () => Promise<void>
@@ -152,12 +168,13 @@ interface AppState {
   openSettings: () => void
   back: () => void
   goInbox: () => void
-  setRailItem: (item: RailItem) => void
-  setSidebarOpen: (open: boolean) => void
+  setPopover: (popover: Popover) => void
   setAccount: (accountId: string) => void
 
   // mail actions (thread-level; main resolves the messages)
   threadAction: (refs: ThreadRef | ThreadRef[], action: ThreadAction) => void
+  /** Archive a conversation with an undo toast ("Done") */
+  done: (ref: ThreadRef) => void
   /** "Mark all done" for a smart-inbox group: every conversation in it, not just the loaded page */
   archiveGroup: (scope: string | null, category: string, includeArchived: boolean) => void
   deleteDraft: (draft: Message) => void
@@ -179,18 +196,23 @@ interface AppState {
   // ui state
   toggleHideDone: () => void
   setSearchOpen: (open: boolean) => void
-  /** Open the composer, blank or editing `draft` */
-  openCompose: (draft?: Message | null) => void
+  /** Open the composer: blank, editing `draft`, or prefilled */
+  openCompose: (draft?: Message | null, prefill?: { to: string } | null) => void
   closeCompose: () => void
   setSignature: (signature: string) => void
   toggleShowWordCount: () => void
+  showToast: (text: string, undo?: () => void) => void
+  dismissToast: () => void
 }
+
+const CLOSED_COMPOSER: ComposerState = { open: false, draftId: null, draft: null, prefill: null }
+
+let toastTimer: number | undefined
 
 export const useAppStore = create<AppState>()((set, get) => ({
   view: { name: 'inbox' },
   prevView: null,
-  railItem: 'inbox',
-  sidebarOpen: false,
+  popover: null,
   activeAccountId: 'all',
   accounts: [],
   connected: false,
@@ -200,10 +222,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
   unread: [],
   hideDone: true,
   searchOpen: false,
-  composer: { open: false, draftId: null, draft: null },
+  composer: CLOSED_COMPOSER,
   signature: '',
   showWordCount: true,
-  refreshCount: 0,
+  toast: null,
 
   init: async () => {
     if (!hasMailApi()) return
@@ -242,19 +264,21 @@ export const useAppStore = create<AppState>()((set, get) => ({
     await loadShared()
   },
 
-  openGroup: (category) => set({ view: { name: 'group', category } }),
-  openFolder: (folder) => set({ view: { name: 'folder', folder } }),
+  openGroup: (category) => set({ view: { name: 'group', category }, popover: null }),
+  openFolder: (folder) => set({ view: { name: 'folder', folder }, prevView: null, popover: null }),
   openThread: (ref) => {
     set((s) => ({
       view: { name: 'thread', ref },
-      prevView: s.view.name === 'thread' || s.view.name === 'settings' ? s.prevView : s.view
+      prevView: s.view.name === 'thread' || s.view.name === 'settings' ? s.prevView : s.view,
+      popover: null
     }))
     get().threadAction(ref, 'markSeen')
   },
   openSettings: () =>
     set((s) => ({
       view: { name: 'settings' },
-      prevView: s.view.name === 'thread' || s.view.name === 'settings' ? s.prevView : s.view
+      prevView: s.view.name === 'thread' || s.view.name === 'settings' ? s.prevView : s.view,
+      popover: null
     })),
   back: () =>
     set((s) => {
@@ -263,16 +287,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
       }
       return { view: { name: 'inbox' }, prevView: null }
     }),
-  goInbox: () => set({ view: { name: 'inbox' }, prevView: null, railItem: 'inbox' }),
-  setRailItem: (item) =>
-    set(() => {
-      const base = { railItem: item, prevView: null }
-      if (item === 'home' || item === 'inbox') return { ...base, view: { name: 'inbox' } as View }
-      return { ...base, view: { name: 'folder', folder: item } as View }
-    }),
-  setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
+  goInbox: () => set({ view: { name: 'inbox' }, prevView: null, popover: null }),
+  setPopover: (popover) => set({ popover }),
   setAccount: (activeAccountId) => {
-    set({ activeAccountId })
+    set({ activeAccountId, popover: null })
     void loadShared().catch(logFailure('reload'))
   },
 
@@ -281,6 +299,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const list = Array.isArray(refs) ? refs : [refs]
     if (list.length === 0) return
     window.api.threadAction(list, action).catch(logFailure(`thread ${action}`))
+  },
+  done: (ref) => {
+    const s = get()
+    s.threadAction(ref, 'archive')
+    s.showToast('Marked done', () => get().threadAction(ref, 'toggleArchive'))
   },
   archiveGroup: (scope, category, includeArchived) => {
     if (!get().connected) return
@@ -297,7 +320,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
         refs.push(...page.threads)
         cursor = page.nextCursor
       } while (cursor)
-      if (refs.length > 0) await window.api.threadAction(refs, 'archive')
+      if (refs.length === 0) return
+      await window.api.threadAction(refs, 'archive')
+      get().showToast('All done', () => get().threadAction(refs, 'toggleArchive'))
     })().catch(logFailure('archive group'))
   },
   deleteDraft: (draft) => {
@@ -325,9 +350,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
       threadId: existing?.threadId,
       category: existing?.category ?? 'people'
     }
-    set({ composer: { open: false, draftId: null, draft: null } })
+    set({ composer: CLOSED_COMPOSER })
     // Composer sends go out immediately (the reply toast's Undo is the delayed path)
     window.api.queueSend(input, Date.now()).catch(logFailure('send'))
+    const first = input.to[0]
+    s0.showToast(first ? `Message sent to ${first.name ?? first.address}` : 'Message sent')
   },
   saveDraft: ({ to, subject, body, html, accountId, draftId }) => {
     const s = get()
@@ -347,7 +374,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       threadId: existing?.threadId,
       category: existing?.category ?? 'people'
     }
-    set({ composer: { open: false, draftId: null, draft: null } })
+    set({ composer: CLOSED_COMPOSER })
     window.api.saveDraft(input).catch(logFailure('save draft'))
   },
   sendReply: (thread, body, html) => queueReply(get(), thread, body, html, UNDO_SEND_MS),
@@ -371,7 +398,6 @@ export const useAppStore = create<AppState>()((set, get) => ({
   refreshInbox: () => {
     if (!get().connected) return
     void window.api.refresh().catch(logFailure('refresh'))
-    set((s) => ({ refreshCount: s.refreshCount + 1 }))
   },
 
   toggleHideDone: () => {
@@ -379,10 +405,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ hideDone })
     persistSetting(SETTING_KEYS.hideDone, String(hideDone))
   },
-  setSearchOpen: (searchOpen) => set({ searchOpen }),
-  openCompose: (draft = null) =>
-    set({ composer: { open: true, draftId: draft?.messageId ?? null, draft } }),
-  closeCompose: () => set({ composer: { open: false, draftId: null, draft: null } }),
+  setSearchOpen: (searchOpen) => set({ searchOpen, popover: null }),
+  openCompose: (draft = null, prefill = null) =>
+    set({
+      composer: { open: true, draftId: draft?.messageId ?? null, draft, prefill },
+      popover: null
+    }),
+  closeCompose: () => set({ composer: CLOSED_COMPOSER }),
   setSignature: (signature) => {
     set({ signature })
     persistSetting(SETTING_KEYS.signature, signature)
@@ -391,6 +420,26 @@ export const useAppStore = create<AppState>()((set, get) => ({
     const showWordCount = !get().showWordCount
     set({ showWordCount })
     persistSetting(SETTING_KEYS.showWordCount, String(showWordCount))
+  },
+  showToast: (text, undo) => {
+    window.clearTimeout(toastTimer)
+    const dismiss = get().dismissToast
+    set({
+      toast: {
+        text,
+        undo: undo
+          ? () => {
+              undo()
+              dismiss()
+            }
+          : undefined
+      }
+    })
+    toastTimer = window.setTimeout(dismiss, TOAST_MS)
+  },
+  dismissToast: () => {
+    window.clearTimeout(toastTimer)
+    set({ toast: null })
   }
 }))
 
@@ -444,4 +493,14 @@ function queueReply(
 /** Null when every account is shown; the id otherwise (what main's queries take) */
 export function accountScope(activeAccountId: string): string | null {
   return activeAccountId === 'all' ? null : activeAccountId
+}
+
+/** Human title for a folder view */
+export const FOLDER_TITLES: Record<FolderView, string> = {
+  pins: 'Pins',
+  drafts: 'Drafts',
+  sent: 'Sent',
+  trash: 'Trash',
+  spam: 'Spam',
+  archive: 'Archive'
 }

@@ -17,19 +17,21 @@ export interface ResolvedIdentity {
   isBareAddress: boolean
 }
 
+/**
+ * One oklch family (same lightness and chroma, hue steps of 36°) so people-color
+ * reads as designed rather than random; every avatar sits at the same weight.
+ */
 const AVATAR_COLORS = [
-  '#6623FF',
-  '#2196F3',
-  '#EC00AF',
-  '#C56BDA',
-  '#43A047',
-  '#FF7043',
-  '#0288D1',
-  '#7B1FA2',
-  '#00897B',
-  '#5C6BC0',
-  '#D81B60',
-  '#F4511E'
+  '#a3575f',
+  '#9f5f37',
+  '#8b6d1f',
+  '#677b34',
+  '#33835c',
+  '#008384',
+  '#207ba1',
+  '#576fac',
+  '#7d62a2',
+  '#975985'
 ]
 
 export function colorForAddress(address: string): string {

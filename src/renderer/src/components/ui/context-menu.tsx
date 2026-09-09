@@ -16,8 +16,7 @@ const ContextMenuContent = React.forwardRef<
     <ContextMenuPrimitive.Content
       ref={ref}
       className={cn(
-        'z-[80] min-w-[180px] rounded-[10px] border border-white/10 bg-elevation-2 p-1 text-[13px] text-text-primary shadow-[0_10px_60px_0_rgba(0,0,0,0.4)]',
-        // Entrance: fade + subtle scale from Radix's transform origin (@starting-style)
+        'z-[80] min-w-[190px] rounded-[10px] border border-edge bg-popover py-2 text-[13px] text-muted shadow-[0_16px_48px_rgba(0,0,0,0.5)]',
         'origin-[var(--radix-context-menu-content-transform-origin)] transition-[opacity,scale] duration-150 ease-out starting:scale-95 starting:opacity-0',
         className
       )}
@@ -34,7 +33,7 @@ const ContextMenuItem = React.forwardRef<
   <ContextMenuPrimitive.Item
     ref={ref}
     className={cn(
-      'flex cursor-default select-none items-center gap-2 rounded-[7px] px-2.5 py-1.5 outline-none focus:bg-white/10',
+      'flex cursor-pointer select-none items-center gap-2 px-4 py-1.5 outline-none focus:bg-hover-strong focus:text-ink',
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
       className
     )}
@@ -49,7 +48,7 @@ const ContextMenuSeparator = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <ContextMenuPrimitive.Separator
     ref={ref}
-    className={cn('-mx-1 my-1 h-px bg-white/10', className)}
+    className={cn('my-2 h-px bg-line', className)}
     {...props}
   />
 ))

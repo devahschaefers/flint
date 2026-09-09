@@ -1,10 +1,11 @@
-import { Check, Pin } from 'lucide-react'
 import type { WireThread } from '../../../../preload/index.d'
 import { shortDate } from '../../lib/dates'
 import { resolveMailbox, resolveNames } from '../../lib/identity'
 import { normalizeSubject } from '../../lib/threads'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store'
+import Avatar from '../ui/Avatar'
+import RowAction from './RowAction'
 import SendStatus from './SendStatus'
 import {
   ContextMenu,
@@ -16,15 +17,18 @@ import {
 
 interface ThreadRowProps {
   thread: WireThread
-  onClick?: () => void
-  /** Text to show in place of the preview (search results show the matched snippet) */
-  preview?: string
+  onOpen: () => void
 }
 
-/** One conversation in a list. Everything shown was computed in SQL by main. */
-export default function ThreadRow({ thread, onClick, preview }: ThreadRowProps): React.JSX.Element {
+/**
+ * One conversation: avatar, sender, subject, date. Hovering swaps the date for
+ * the row's verbs (Done · Pin · Open); right-click has the rest. Everything
+ * shown was computed in SQL by main.
+ */
+export default function ThreadRow({ thread, onOpen }: ThreadRowProps): React.JSX.Element {
   const contacts = useAppStore((s) => s.contacts)
   const threadAction = useAppStore((s) => s.threadAction)
+  const done = useAppStore((s) => s.done)
   const ref = { accountId: thread.accountId, threadKey: thread.threadKey }
 
   // Avatar identity is always address-keyed: the counterpart, or (pure sent
@@ -45,99 +49,81 @@ export default function ThreadRow({ thread, onClick, preview }: ThreadRowProps):
   const inTrashOrSpam = folders.trash > 0 || folders.spam > 0
   // Moves only touch non-sent/non-draft messages — hide the items that would do nothing
   const movable = thread.count > folders.sent + folders.drafts
+  const subject = normalizeSubject(thread.subject) || '(no subject)'
+
+  const primary = inTrashOrSpam
+    ? { label: 'Restore', run: () => threadAction(ref, 'inbox') }
+    : archived
+      ? { label: 'To inbox', run: () => threadAction(ref, 'toggleArchive') }
+      : folders.inbox > 0
+        ? { label: 'Done', run: () => done(ref) }
+        : null
 
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <button
-          onClick={onClick}
+        <div
+          role="button"
+          onClick={onOpen}
           className={cn(
-            'group flex h-[42px] w-full items-center gap-[10px] rounded-[10px] px-[10px] text-left transition-colors hover:bg-elevation-1',
-            archived && 'opacity-60'
+            'group -mx-3 flex cursor-pointer items-center gap-3 rounded-[8px] px-3 py-[10px] transition-colors hover:bg-row',
+            archived && 'opacity-45'
           )}
         >
-          <span className="flex w-[26px] shrink-0 items-center justify-center">
-            {inTrashOrSpam ? (
-              // Done is a no-op here — restore goes through "Move to Inbox"
-              unread && <span className="h-2 w-2 rounded-full bg-blue-3" />
-            ) : archived ? (
+          <Avatar initials={identity.initials} color={identity.color} />
+          <span className="flex min-w-0 flex-1 items-center gap-[9px]">
+            <span className="flex min-w-0 flex-1 items-baseline gap-[9px] overflow-hidden">
               <span
-                role="button"
-                title="Move to Inbox"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  threadAction(ref, 'toggleArchive')
-                }}
-                className="flex h-4 w-4 items-center justify-center rounded-full bg-text-muted text-elevation-0 transition-colors hover:bg-blue-4 hover:text-white"
+                className={cn(
+                  'shrink-0 whitespace-nowrap text-[13.5px]',
+                  unread ? 'font-semibold text-ink' : 'text-dim'
+                )}
               >
-                <Check size={10} strokeWidth={3} />
+                {name}
+                {thread.count > 1 && (
+                  <span className="ml-1.5 text-[12px] font-normal text-meta">{thread.count}</span>
+                )}
               </span>
-            ) : (
-              <>
-                {unread && <span className="h-2 w-2 rounded-full bg-blue-3 group-hover:hidden" />}
-                <span
-                  role="button"
-                  title="Done"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    threadAction(ref, 'toggleArchive')
-                  }}
-                  className="hidden h-[18px] w-[18px] items-center justify-center rounded-full border-[1.5px] border-text-muted text-text-muted transition-colors hover:border-green-3 hover:bg-green-3 hover:text-white group-hover:flex"
-                >
-                  <Check size={11} />
+              <span
+                className={cn(
+                  'min-w-0 truncate text-[13.5px]',
+                  unread ? 'text-strong' : 'text-quiet'
+                )}
+              >
+                {subject}
+              </span>
+              {thread.latest.folder === 'drafts' && (
+                <span className="shrink-0 text-[11px] text-warn">Draft</span>
+              )}
+              <SendStatus state={thread.latest.state} sendError={thread.latest.sendError} />
+            </span>
+
+            <span className="hidden shrink-0 items-center gap-0.5 text-[12.5px] text-strong group-hover:flex">
+              {primary && <RowAction onClick={primary.run}>{primary.label}</RowAction>}
+              <RowAction onClick={() => threadAction(ref, 'toggleFlagged')}>
+                {thread.flagged ? 'Unpin' : 'Pin'}
+              </RowAction>
+              <RowAction accent onClick={onOpen}>
+                Open
+              </RowAction>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 group-hover:hidden">
+              {thread.flagged && (
+                <span className="text-[9px] text-meta" title="Pinned">
+                  ◆
                 </span>
-              </>
-            )}
-          </span>
-
-          <span
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold text-white"
-            style={{ backgroundColor: identity.color }}
-          >
-            {identity.initials}
-          </span>
-
-          <span className="w-[230px] shrink-0 truncate text-[13px] font-semibold text-text-primary">
-            {name}
-            {thread.count > 1 && (
-              <span className="font-normal text-[12px] text-text-secondary"> {thread.count}</span>
-            )}
-          </span>
-
-          <span className="min-w-0 flex-1 truncate text-[13px]">
-            <span className="font-semibold text-text-primary">
-              {normalizeSubject(thread.subject) || '(no subject)'}
-            </span>
-            {thread.latest.folder === 'drafts' && (
-              <span className="font-normal text-red-3">{'  Draft'}</span>
-            )}
-            <SendStatus
-              state={thread.latest.state}
-              sendError={thread.latest.sendError}
-              className="ml-2 align-middle"
-            />
-            <span className="font-normal text-text-secondary">
-              {'  ' + (preview ?? thread.latest.snippet).slice(0, 140)}
+              )}
+              {unread && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
+              <span className="whitespace-nowrap text-[12px] text-meta">{shortDate(date)}</span>
             </span>
           </span>
-
-          {thread.flagged && (
-            <Pin size={11} className="shrink-0 text-yellow-3" fill="currentColor" />
-          )}
-
-          <span
-            className={cn(
-              'shrink-0 text-[12px] tabular-nums',
-              unread ? 'text-blue-3' : 'text-text-secondary'
-            )}
-          >
-            {shortDate(date)}
-          </span>
-        </button>
+        </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
         {!inTrashOrSpam && (
-          <ContextMenuItem onSelect={() => threadAction(ref, 'toggleArchive')}>
+          <ContextMenuItem
+            onSelect={() => (archived ? threadAction(ref, 'toggleArchive') : done(ref))}
+          >
             {archived ? 'Move to Inbox' : 'Done'}
           </ContextMenuItem>
         )}

@@ -1,7 +1,7 @@
-import { AlertCircle, Loader2 } from 'lucide-react'
 import type { Message, MessageState } from '../../data/types'
 import { cn } from '../../lib/utils'
 import { useAppStore } from '../../store'
+import { Spinner } from '../ui/icons'
 
 /** Compact lifecycle label for a message that hasn't reached Gmail (or failed to) */
 function sendStatusLabel(state: MessageState): string | null {
@@ -46,35 +46,40 @@ export default function SendStatus({
   if (!label) return null
   const failed = state === 'failed'
 
-  const Icon = failed ? AlertCircle : Loader2
-  const tone = failed ? 'text-red-3' : 'text-text-muted'
-
   return (
     <span
-      className={cn('inline-flex items-center gap-1.5 text-[11px] font-semibold', tone, className)}
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1.5 text-[11px]',
+        failed ? 'text-danger' : 'text-meta',
+        className
+      )}
       title={sendError ?? undefined}
     >
-      <Icon size={11} className={cn(!failed && 'animate-spin')} />
+      {!failed && <Spinner />}
       {label}
       {message && failed && (
         <>
           <button
-            onClick={() => retrySend(message)}
-            className="ml-1 rounded-[5px] bg-elevation-2 px-1.5 py-[1px] text-text-primary transition-colors hover:bg-elevation-3"
+            onClick={(e) => {
+              e.stopPropagation()
+              retrySend(message)
+            }}
+            className="ml-1 rounded-[5px] px-1.5 py-[1px] text-strong transition-colors hover:bg-line-strong hover:text-accent"
           >
             Retry
           </button>
           <button
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation()
               revertToDraft(message)
               openCompose(message)
             }}
-            className="rounded-[5px] bg-elevation-2 px-1.5 py-[1px] text-text-primary transition-colors hover:bg-elevation-3"
+            className="rounded-[5px] px-1.5 py-[1px] text-strong transition-colors hover:bg-line-strong hover:text-accent"
           >
             Edit
           </button>
           {sendError && (
-            <span className="ml-1 truncate font-normal text-text-muted" title={sendError}>
+            <span className="ml-1 truncate text-label" title={sendError}>
               {sendError}
             </span>
           )}

@@ -1,24 +1,13 @@
 import { useEditorState, type Editor } from '@tiptap/react'
-import {
-  Bold,
-  Code,
-  Image as ImageIcon,
-  Italic,
-  Link as LinkIcon,
-  List,
-  ListOrdered,
-  Quote,
-  Underline
-} from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { insertImagePlaceholder, promptForLink } from './composeEditor'
 import { EditorChip } from './RichEditor'
 
 function Divider(): React.JSX.Element {
-  return <span className="mx-1 h-[15px] w-px bg-white/10" />
+  return <span className="mx-1 h-[14px] w-px bg-edge" />
 }
 
-/** Persistent formatting toolbar shown above every rich compose editor. */
+/** Persistent formatting toolbar above every rich compose editor — glyphs, not icons */
 export default function Toolbar({
   editor,
   className
@@ -46,27 +35,27 @@ export default function Toolbar({
   if (!editor || !active) return null
 
   return (
-    <div className={cn('flex items-center gap-0.5 border-b border-white/5 py-1.5 pl-3', className)}>
+    <div className={cn('flex items-center gap-0.5 text-[11px] text-quiet', className)}>
       <EditorChip
         title="Text"
         active={active.paragraph}
         onCmd={() => editor.chain().focus().setParagraph().run()}
       >
-        <span className="text-[11.5px]">¶</span>
+        ¶
       </EditorChip>
       <EditorChip
         title="Heading"
         active={active.h2}
         onCmd={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
       >
-        <span className="text-[11px] font-bold">H1</span>
+        <b>H1</b>
       </EditorChip>
       <EditorChip
         title="Subheading"
         active={active.h3}
         onCmd={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
       >
-        <span className="text-[11px] font-bold">H2</span>
+        <b>H2</b>
       </EditorChip>
       <Divider />
       <EditorChip
@@ -74,21 +63,21 @@ export default function Toolbar({
         active={active.bold}
         onCmd={() => editor.chain().focus().toggleBold().run()}
       >
-        <Bold size={13} />
+        <b>B</b>
       </EditorChip>
       <EditorChip
         title="Italic ⌘I"
         active={active.italic}
         onCmd={() => editor.chain().focus().toggleItalic().run()}
       >
-        <Italic size={13} />
+        <i className="font-serif">I</i>
       </EditorChip>
       <EditorChip
         title="Underline ⌘U"
         active={active.underline}
         onCmd={() => editor.chain().focus().toggleUnderline().run()}
       >
-        <Underline size={13} />
+        <u>U</u>
       </EditorChip>
       <Divider />
       <EditorChip
@@ -96,14 +85,14 @@ export default function Toolbar({
         active={active.bulletList}
         onCmd={() => editor.chain().focus().toggleBulletList().run()}
       >
-        <List size={14} />
+        ≡
       </EditorChip>
       <EditorChip
         title="Numbered list"
         active={active.orderedList}
         onCmd={() => editor.chain().focus().toggleOrderedList().run()}
       >
-        <ListOrdered size={14} />
+        1.
       </EditorChip>
       <Divider />
       <EditorChip
@@ -111,21 +100,21 @@ export default function Toolbar({
         active={active.blockquote}
         onCmd={() => editor.chain().focus().toggleBlockquote().run()}
       >
-        <Quote size={13} />
+        ❝
       </EditorChip>
       <EditorChip
         title="Code block"
         active={active.codeBlock}
         onCmd={() => editor.chain().focus().toggleCodeBlock().run()}
       >
-        <Code size={13} />
+        {'</>'}
       </EditorChip>
       <Divider />
       <EditorChip title="Link" active={active.link} onCmd={() => promptForLink(editor)}>
-        <LinkIcon size={13} />
+        <u>a</u>
       </EditorChip>
       <EditorChip title="Image" onCmd={() => insertImagePlaceholder(editor)}>
-        <ImageIcon size={13} />
+        ▣
       </EditorChip>
     </div>
   )
