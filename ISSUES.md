@@ -11,10 +11,13 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   migrations off the main thread, would hide it. `src/main/db.ts`.
 - **Medium** — Attachments are skipped entirely; a message with only an attachment looks
   empty. Needs part metadata + on-demand download. `src/main/google/gmail.ts`.
-- **Low** — Every thread-list page aggregates the whole mailbox (GROUP BY over all
-  messages, then filter/sort/limit): 50–100 ms per page on 21k conversations, re-run on each
-  mail change. Fine today; a maintained `threads` table (updated on message writes) is the
-  fix if it grows. `src/main/queries.ts`.
+- **Medium** — List queries scale with the mailbox, not the page. Every thread-list page and
+  the smart-inbox overview aggregate all messages in scope (GROUP BY, then filter/sort/limit):
+  50–100 ms per page on 21k conversations, re-run on every mail change and every scroll page.
+  `listContacts` walks every row (40 ms) on each change too. Linear in messages, so ~6 more
+  accounts of similar size means 0.4–0.7 s per page and a sluggish "All accounts" view. Fix:
+  a maintained `threads` table (and a `contacts` table) updated on message writes, so a page
+  is an index range read regardless of size. `src/main/queries.ts`.
 - **Low** — Full resync after history expiry fetches at most 2,000 newest missing messages
   (`RESYNC_NEW_CAP`); a longer gap leaves holes until the next pass. It also still fetches
   them with `format=full` rather than metadata-first like backfill. `src/main/sync.ts`.
