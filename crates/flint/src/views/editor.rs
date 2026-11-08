@@ -161,6 +161,7 @@ pub fn toolbar(prefix: &'static str, state: &Entity<TextareaState>) -> Div {
     let s = || state.clone();
     div()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap(px(2.))
         .text_size(px(11.))

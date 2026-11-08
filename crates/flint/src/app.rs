@@ -226,6 +226,8 @@ pub struct FlintApp {
     saved_list: Option<(Screen, ListPage, ScrollHandle)>,
     /// Window content size, refreshed at the top of every render
     pub viewport: Size<Pixels>,
+    /// Unsent reply text by conversation, kept while the app is running
+    pub reply_drafts: std::collections::HashMap<ThreadRef, String>,
 
     pub view: Screen,
     pub prev_view: Option<Screen>,
@@ -287,6 +289,7 @@ impl FlintApp {
             scroll: ScrollHandle::new(),
             saved_list: None,
             viewport: window.viewport_size(),
+            reply_drafts: Default::default(),
             view: Screen::Inbox,
             prev_view: None,
             popover: None,
@@ -590,6 +593,14 @@ impl FlintApp {
         self.popover = None;
         self.context_menu = None;
         self.hovered_row = None;
+        if let PageState::Thread(t) = &self.page {
+            let (r, text) = (t.thread_ref.clone(), t.reply_text.clone());
+            if text.trim().is_empty() {
+                self.reply_drafts.remove(&r);
+            } else {
+                self.reply_drafts.insert(r, text);
+            }
+        }
         // Keep loaded pages as well as the offset, so returning to a deep row
         // does not clamp the scroll position to the first page's height.
         if Self::remembers(&self.view) && !Self::remembers(&view) {

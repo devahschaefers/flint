@@ -64,6 +64,11 @@ fn message_key(m: &WireMessage) -> String {
 impl ThreadState {
     pub fn new(thread_ref: ThreadRef, app: &FlintApp, window: &mut Window, cx: &mut Context<FlintApp>) -> Self {
         let reply = cx.new(|cx| TextareaState::new(window, cx).placeholder("Reply…").auto_grow(4, 18));
+        // Text left behind the last time this conversation was open
+        let saved = app.reply_drafts.get(&thread_ref).cloned().unwrap_or_default();
+        if !saved.is_empty() {
+            reply.update(cx, |s, cx| s.set_value(saved.clone(), window, cx));
+        }
         let sub = cx.subscribe_in(&reply, window, |this: &mut FlintApp, state, ev: &InputEvent, _, cx| {
             if let InputEvent::Change = ev {
                 let text = state.read(cx).value().to_string();
@@ -82,7 +87,7 @@ impl ThreadState {
             images: HashSet::new(),
             reply_mode: ReplyMode::Collapsed,
             reply,
-            reply_text: String::new(),
+            reply_text: saved,
             placeholder: "Reply…".into(),
             custom_height: None,
             drag: None,
@@ -279,7 +284,7 @@ impl FlintApp {
                             .text_color(c(INK))
                             .child(if own { "You".to_string() } else { id.name.clone() }),
                     )
-                    .child(div().text_size(px(12.)).text_color(c(LABEL)).child(format!("{}{cc}", self.recipients_label(m))))
+                    .child(div().min_w_0().max_w_full().text_size(px(12.)).text_color(c(LABEL)).child(format!("{}{cc}", self.recipients_label(m))))
                     .when(is_draft, |d| d.child(div().ml(px(8.)).text_size(px(11.)).text_color(c(WARN)).child("Draft")))
                     .children(send_status(m.state).map(|s| s.ml(px(8.))))
                     .when(m.state == MessageState::Failed, |d| {
@@ -419,6 +424,10 @@ impl FlintApp {
             let reply = t.reply.clone();
             reply.update(cx, |s, cx| s.focus(window, cx));
         }
+        if mode == ReplyMode::Open {
+            // The card is the page's last element; bring all of it into view
+            self.scroll.scroll_to_bottom();
+        }
         cx.notify();
     }
 
@@ -456,6 +465,7 @@ impl FlintApp {
         let markdown = t.reply.read(cx).value().to_string();
         let messages = t.messages.clone();
         let reply = t.reply.clone();
+        let sent_from = t.thread_ref.clone();
         let Some((account_id, hdr)) = self.send_reply(&messages, &markdown, cx) else { return };
         reply.update(cx, |s, cx| s.set_value("", window, cx));
         if let Some(t) = self.thread_mut() {
@@ -464,6 +474,11 @@ impl FlintApp {
         self.set_reply_mode(ReplyMode::Collapsed, window, cx);
         let undo: Handler = Rc::new(move |this, window, cx| {
             this.unsend(account_id.clone(), hdr.clone(), cx);
+            // The reader may have moved on: never drop this text into another conversation
+            if !this.thread().is_some_and(|t| t.thread_ref == sent_from) {
+                this.reply_drafts.insert(sent_from.clone(), markdown.clone());
+                return;
+            }
             if let Some(t) = this.thread_mut() {
                 let reply = t.reply.clone();
                 reply.update(cx, |s, cx| s.set_value(markdown.clone(), window, cx));
@@ -620,7 +635,8 @@ impl FlintApp {
                 div()
                     .absolute()
                     .right(px(8.))
-                    .top(px(6.))
+                    // Level with the toolbar row (its padding is also 12)
+                    .top(px(12.))
                     .flex()
                     .items_center()
                     .gap(px(2.))
@@ -649,14 +665,15 @@ impl FlintApp {
                     .py(px(10.))
                     .child(
                         primary_button("reply-send", "Send", has_text, Box::new(cx.listener(|this, _, window, cx| this.reply_send(window, cx))))
+                            .flex_none()
                             .px(px(16.))
                             .py(px(6.))
                             .rounded(px(7.))
                             .text_size(px(12.)),
                     )
-                    .child(quiet_button("reply-cancel", "Cancel", true, Box::new(cx.listener(|this, _, window, cx| this.set_reply_mode(ReplyMode::Collapsed, window, cx)))).text_size(px(12.)))
+                    .child(quiet_button("reply-cancel", "Cancel", true, Box::new(cx.listener(|this, _, window, cx| this.set_reply_mode(ReplyMode::Collapsed, window, cx)))).flex_none().text_size(px(12.)))
                     .child(spacer())
-                    .child(div().text_size(px(11.)).text_color(c(HINT)).child(editor::hint(if has_text { words } else { None }))),
+                    .child(div().min_w_0().truncate().text_size(px(11.)).text_color(c(HINT)).child(editor::hint(if has_text { words } else { None }))),
             )
             .into_any_element()
     }
