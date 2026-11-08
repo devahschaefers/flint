@@ -14,10 +14,19 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use std::rc::Rc;
 
-/// Rows reveal their actions under this hover group
-const ROW_GROUP: &str = "row";
-
 impl FlintApp {
+    /// Rows swap their date for their verbs while hovered. Tracked here rather
+    /// than with group_hover styles, since GPUI cannot change an element's
+    /// display between layout and paint.
+    fn set_row_hover(&mut self, key: (&'static str, usize), hovered: bool, cx: &mut Context<Self>) {
+        if hovered {
+            self.hovered_row = Some(key);
+        } else if self.hovered_row == Some(key) {
+            self.hovered_row = None;
+        }
+        cx.notify();
+    }
+
     /// The one layout: a scrolling column with generous side margins and no chrome
     pub fn page(&self, id: &'static str, tight: bool, content: impl IntoElement) -> AnyElement {
         div()
@@ -378,9 +387,10 @@ impl FlintApp {
             stack = stack.child(avatar(format!("+{more}"), STACK, 18.).border(px(1.5)).border_color(c(BG)).ml(px(-5.)));
         }
 
+        let hovered = self.hovered_row == Some(("bundle", ix));
         div()
             .id(("bundle", ix))
-            .group(ROW_GROUP)
+            .on_hover(cx.listener(move |this, h: &bool, _, cx| this.set_row_hover(("bundle", ix), *h, cx)))
             .mx(px(-12.))
             .px(px(12.))
             .py(px(6.))
@@ -401,19 +411,14 @@ impl FlintApp {
                 div().whitespace_nowrap().text_color(c(META)).child(group.count.to_string())
             })
             .child(spacer())
-            .child(
-                div()
-                    .hidden()
-                    .group_hover(ROW_GROUP, |s| s.flex())
-                    .text_size(px(12.))
-                    .text_color(c(STRONG))
-                    .child(row_action(
-                        ("bundle-done", ix),
-                        "Mark all done",
-                        false,
-                        Box::new(cx.listener(move |this, _, _, cx| this.archive_group(done_cat.clone(), cx))),
-                    )),
-            )
+            .when(hovered, |d| {
+                d.child(div().text_size(px(12.)).text_color(c(STRONG)).child(row_action(
+                    ("bundle-done", ix),
+                    "Mark all done",
+                    false,
+                    Box::new(cx.listener(move |this, _, _, cx| this.archive_group(done_cat.clone(), cx))),
+                )))
+            })
             .child(div().text_color(c(HINT)).child("→"))
             .into_any_element()
     }
@@ -452,9 +457,9 @@ impl FlintApp {
         };
 
         let open_ref = r.clone();
+        let hovered = self.hovered_row == Some(("thread", ix));
         let mut actions = div()
-            .hidden()
-            .group_hover(ROW_GROUP, |s| s.flex())
+            .flex()
             .flex_shrink_0()
             .items_center()
             .gap(px(2.))
@@ -495,7 +500,6 @@ impl FlintApp {
 
         let meta = div()
             .flex()
-            .group_hover(ROW_GROUP, |s| s.hidden())
             .flex_shrink_0()
             .items_center()
             .gap(px(8.))
@@ -506,7 +510,7 @@ impl FlintApp {
         let menu_ref = r.clone();
         div()
             .id(("thread", ix))
-            .group(ROW_GROUP)
+            .on_hover(cx.listener(move |this, h: &bool, _, cx| this.set_row_hover(("thread", ix), *h, cx)))
             .mx(px(-12.))
             .px(px(12.))
             .py(px(10.))
@@ -575,8 +579,7 @@ impl FlintApp {
                             })
                             .children(send_status(t.latest.state)),
                     )
-                    .child(actions)
-                    .child(meta),
+                    .child(if hovered { actions } else { meta }),
             )
             .into_any_element()
     }
@@ -588,10 +591,11 @@ impl FlintApp {
         let subject = if draft.subject.is_empty() || draft.subject == "(no subject)" { "Untitled".to_string() } else { draft.subject.clone() };
         let (d_open, d_open2, d_menu) = (draft.clone(), draft.clone(), draft.clone());
         let (acct, hdr) = (draft.account_id.clone(), draft.message_id_hdr.clone().unwrap_or_default());
+        let hovered = self.hovered_row == Some(("draft", ix));
 
         div()
             .id(("draft", ix))
-            .group(ROW_GROUP)
+            .on_hover(cx.listener(move |this, h: &bool, _, cx| this.set_row_hover(("draft", ix), *h, cx)))
             .mx(px(-12.))
             .px(px(12.))
             .py(px(10.))
@@ -640,27 +644,24 @@ impl FlintApp {
                             .child(div().flex_shrink_0().whitespace_nowrap().text_size(px(13.5)).text_color(c(DIM)).child(name))
                             .child(div().min_w_0().truncate().text_size(px(13.5)).text_color(c(QUIET)).child(subject)),
                     )
-                    .child(
+                    .child(if hovered {
                         div()
-                            .hidden()
-                            .group_hover(ROW_GROUP, |s| s.flex())
+                            .flex()
                             .flex_shrink_0()
                             .items_center()
                             .gap(px(2.))
                             .text_size(px(12.5))
                             .text_color(c(STRONG))
                             .child(row_action(("draft-del", ix), "Delete", false, Box::new(cx.listener(move |this, _, _, cx| this.delete_draft(acct.clone(), hdr.clone(), cx)))))
-                            .child(row_action(("draft-open", ix), "Open", true, Box::new(cx.listener(move |this, _, w, cx| this.open_compose(Some(d_open2.clone()), None, w, cx))))),
-                    )
-                    .child(
+                            .child(row_action(("draft-open", ix), "Open", true, Box::new(cx.listener(move |this, _, w, cx| this.open_compose(Some(d_open2.clone()), None, w, cx)))))
+                    } else {
                         div()
-                            .group_hover(ROW_GROUP, |s| s.hidden())
                             .flex_shrink_0()
                             .whitespace_nowrap()
                             .text_size(px(12.))
                             .text_color(c(META))
-                            .child(short_date(draft.date_ms)),
-                    ),
+                            .child(short_date(draft.date_ms))
+                    }),
             )
             .into_any_element()
     }

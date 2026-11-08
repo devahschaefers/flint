@@ -84,7 +84,7 @@ pub fn short_date_at(ms: i64, now: DateTime<Local>) -> String {
     let (tday, today) = (day(&t), day(&now));
     if tday == today {
         let h = t.hour();
-        let h12 = if h % 12 == 0 { 12 } else { h % 12 };
+        let h12 = if h.is_multiple_of(12) { 12 } else { h % 12 };
         return format!("{h12}:{:02} {}", t.minute(), if h < 12 { "AM" } else { "PM" });
     }
     if tday >= today - Duration::days(6) {

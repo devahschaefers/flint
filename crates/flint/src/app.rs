@@ -176,6 +176,9 @@ pub enum PageState {
     Settings(SettingsState),
 }
 
+/// What one list reload brings back: overview, threads, next cursor, drafts
+type ListLoad = (Option<InboxOverview>, Vec<WireThread>, Option<ThreadCursor>, Vec<WireMessage>);
+
 pub const THREAD_PAGE: usize = 50;
 /// Undo window before a reply actually leaves the machine
 pub const UNDO_SEND_MS: i64 = 5000;
@@ -219,6 +222,7 @@ pub struct FlintApp {
     pub toast: Option<Toast>,
     toast_seq: u64,
     pub context_menu: Option<ContextMenu>,
+    pub hovered_row: Option<(&'static str, usize)>,
 
     pub page: PageState,
     pub search: Option<SearchState>,
@@ -226,6 +230,8 @@ pub struct FlintApp {
     pub startup_error: Option<String>,
     /// Debug builds: screen to open once data arrives (see dev.rs)
     pub dev_open: Option<String>,
+    #[cfg_attr(not(feature = "screenshots"), allow(dead_code))]
+    pub dev_shot_scheduled: bool,
 }
 
 impl FlintApp {
@@ -269,10 +275,12 @@ impl FlintApp {
             toast: None,
             toast_seq: 0,
             context_menu: None,
+            hovered_row: None,
             page: PageState::List(ListPage::new()),
             search: None,
             composer: None,
             startup_error: None,
+            dev_shot_scheduled: false,
             dev_open: if cfg!(debug_assertions) { std::env::var("FLINT_OPEN").ok() } else { None },
         };
         app.init(cx);
@@ -452,7 +460,7 @@ impl FlintApp {
                 let include_archived = !self.hide_done;
                 self.bg(
                     cx,
-                    move |engine| -> anyhow::Result<(Option<InboxOverview>, Vec<WireThread>, Option<ThreadCursor>, Vec<WireMessage>)> {
+                    move |engine| -> anyhow::Result<ListLoad> {
                         let store = engine.store();
                         if is_drafts {
                             return Ok((None, Vec::new(), None, store.list_drafts(scope.as_deref())?));
@@ -550,6 +558,7 @@ impl FlintApp {
     fn enter(&mut self, view: Screen, window: &mut Window, cx: &mut Context<Self>) {
         self.popover = None;
         self.context_menu = None;
+        self.hovered_row = None;
         self.page = match &view {
             Screen::Thread(r) => PageState::Thread(ThreadState::new(r.clone(), self, window, cx)),
             Screen::Settings => PageState::Settings(SettingsState::new(self, window, cx)),

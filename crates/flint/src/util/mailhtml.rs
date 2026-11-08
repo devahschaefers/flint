@@ -86,6 +86,7 @@ fn post_process(html: &str) -> String {
     static TINY: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"(?i)\b(?:width|height)="[0-2]""#).unwrap());
     let flat = TABLE.replace_all(html, "<${1}div>");
+    let flat = unwrap_inline_code(&flat);
     IMG.replace_all(&flat, |c: &regex::Captures| {
         let tag = &c[0];
         if !SRC.is_match(tag) || TINY.is_match(tag) {
@@ -95,6 +96,23 @@ fn post_process(html: &str) -> String {
         }
     })
     .into_owned()
+}
+
+/// GPUI Kit's text view (0.9) paints inline code as a box over the whole
+/// paragraph, hiding its text. Inline `<code>` outside `<pre>` is unwrapped
+/// to plain text until that is fixed upstream; code blocks are unaffected.
+fn unwrap_inline_code(html: &str) -> String {
+    static PRE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<pre\b.*?</pre>").unwrap());
+    static CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</?code\b[^>]*>").unwrap());
+    let mut out = String::with_capacity(html.len());
+    let mut last = 0;
+    for m in PRE.find_iter(html) {
+        out.push_str(&CODE.replace_all(&html[last..m.start()], ""));
+        out.push_str(m.as_str());
+        last = m.end();
+    }
+    out.push_str(&CODE.replace_all(&html[last..], ""));
+    out
 }
 
 // ---------- compose ----------
@@ -339,6 +357,12 @@ mod tests {
         );
         assert_eq!(s.blocked_images, 0);
         assert!(s.html.contains("a.png") && !s.html.contains("p.gif"));
+    }
+
+    #[test]
+    fn unwraps_inline_code_only() {
+        let s = sanitize_for_display("<p>Run <code>x</code></p><pre><code>y</code></pre>", false);
+        assert_eq!(s.html, "<p>Run x</p><pre><code>y</code></pre>");
     }
 
     #[test]

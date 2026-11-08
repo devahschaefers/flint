@@ -668,12 +668,36 @@ fn plain_body(text: &str) -> Div {
 }
 
 fn html_view(id: impl Into<ElementId>, html: String) -> impl IntoElement {
+    // The `.rt` rules from tokens.css; the defaults are GPUI's light palette
+    let code_block = StyleRefinement::default()
+        .bg(c(BG))
+        .border_1()
+        .border_color(c(LINE_STRONG))
+        .rounded(px(8.))
+        .px(px(12.))
+        .py(px(10.))
+        .font_family(MONO)
+        .text_size(px(12.5))
+        .text_color(c(BODY));
     let style = TextViewStyle::default()
         .with_foreground(c(BODY).into())
         .with_muted_foreground(c(QUIET).into())
         .with_link(c(ACCENT).into())
+        .with_selection(ca(ACCENT, 0.3).into())
         .with_border(c(LINE_STRONG).into())
         .with_code_background(c(BG).into())
+        .with_code_block(code_block)
+        .with_inline_code(HighlightStyle {
+            background_color: Some(c(LINE_STRONG).into()),
+            color: Some(c(STRONG).into()),
+            ..Default::default()
+        })
+        .with_inline_code_style(StyleRefinement::default().font_family(MONO).text_size(px(12.5)))
+        .with_blockquote_style(StyleRefinement::default().border_l_2().border_color(c(ACCENT)).pl(px(12.)).text_color(c(QUIET)))
+        .with_heading(|level| {
+            let size = if level <= 2 { 18. } else { 15. };
+            StyleRefinement::default().text_size(px(size)).font_weight(FontWeight::SEMIBOLD).text_color(c(INK))
+        })
         .with_dark(true);
     div()
         .text_size(px(14.))

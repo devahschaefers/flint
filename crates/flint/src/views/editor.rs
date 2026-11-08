@@ -245,7 +245,7 @@ pub fn hint(word_count: Option<usize>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{current_line, strip_block_prefix};
 
     #[test]
     fn prefixes() {

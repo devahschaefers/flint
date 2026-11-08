@@ -5,6 +5,23 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
 
 ## Open
 
+- **Medium** — GPUI app: compose is a Markdown text area, not the TipTap rich editor. The
+  toolbar and `/` menu write Markdown (`# `, `- `, `**…**`, fences), converted to the
+  text/html part on send; there is no live formatting and no selection bubble menu. Drafts
+  written by the Electron editor are converted back to Markdown on open (lossy for markup the
+  converter doesn't know). `crates/flint/src/views/editor.rs`, `util/mailhtml.rs`.
+- **Medium** — GPUI app: mail HTML goes through GPUI Kit's text view, a document renderer,
+  not a browser. Layout tables are flattened to blocks, CSS is ignored, and inline `<code>` is
+  unwrapped to plain text because the text view (0.9) paints it as a box over the whole
+  paragraph. Newsletters read as a single column of text and images.
+  `crates/flint/src/util/mailhtml.rs`.
+- **Low** — GPUI app: lists render every loaded row (a scrolling div, 50 rows per page
+  fetched as you near the bottom) rather than a virtualized list; long scroll sessions grow
+  the frame cost. `crates/flint/src/views/list.rs`.
+- **Low** — GPUI app: an unsigned dev build changes code signature on every rebuild, so
+  macOS asks again for access to the "flint Safe Storage" keychain item after each build.
+- **Low** — GPUI app: the CSS spinner, enter/fade transitions and the drag-region cursor are
+  not reproduced (a static ring marks in-flight sends). `crates/flint/src/views/widgets.rs`.
 - **Medium** — Schema migrations run synchronously in `initDb` before any window is shown:
   the v1→v2 table rebuild was ~15 s on a 1 GB database, and v2→v3 adds the FTS build
   (~1.5 s) plus a one-off `VACUUM` of the whole file. A splash/progress window, or running

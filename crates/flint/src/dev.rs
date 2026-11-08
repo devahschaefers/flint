@@ -82,3 +82,32 @@ impl FlintApp {
         cx.notify();
     }
 }
+
+#[cfg(feature = "screenshots")]
+impl FlintApp {
+    /// FLINT_SHOT=<path>: once the FLINT_OPEN screen is up, save the frame and quit
+    pub fn dev_schedule_shot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Ok(path) = std::env::var("FLINT_SHOT") else { return };
+        if self.dev_open.is_some() || self.dev_shot_scheduled || !self.connected() {
+            return;
+        }
+        self.dev_shot_scheduled = true;
+        let delay = std::env::var("FLINT_SHOT_DELAY_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(1500);
+        cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(delay)).await;
+            this.update_in(cx, |_, window, cx| {
+                window.refresh();
+                match window.render_to_image() {
+                    Ok(img) => match img.save(&path) {
+                        Ok(()) => log::info!("screenshot saved to {path}"),
+                        Err(err) => log::error!("screenshot save failed: {err}"),
+                    },
+                    Err(err) => log::error!("screenshot failed: {err:#}"),
+                }
+                cx.quit();
+            })
+            .ok();
+        })
+        .detach();
+    }
+}

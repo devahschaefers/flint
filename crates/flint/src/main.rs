@@ -6,6 +6,7 @@ mod app;
 mod assets;
 mod dev;
 mod http;
+mod single;
 mod theme;
 mod util;
 mod views;
@@ -18,6 +19,13 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let path = Store::default_path();
+    let _instance = match single::acquire(&path) {
+        Ok(lock) => lock,
+        Err(why) => {
+            eprintln!("{why}");
+            std::process::exit(1);
+        }
+    };
     let store = match Store::open(&path) {
         Ok(store) => store,
         Err(err) => {

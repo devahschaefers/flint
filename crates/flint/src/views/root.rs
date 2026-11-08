@@ -14,6 +14,8 @@ impl Render for FlintApp {
         if self.dev_open.is_some() {
             self.dev_open_pending(window, cx);
         }
+        #[cfg(feature = "screenshots")]
+        self.dev_schedule_shot(window, cx);
         let page = match &self.view {
             Screen::Thread(_) => self.render_thread(window, cx),
             Screen::Settings => self.render_settings(window, cx),
