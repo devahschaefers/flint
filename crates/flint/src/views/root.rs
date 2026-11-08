@@ -11,6 +11,9 @@ use gpui_kit::*;
 
 impl Render for FlintApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.dev_open.is_some() {
+            self.dev_open_pending(window, cx);
+        }
         let page = match &self.view {
             Screen::Thread(_) => self.render_thread(window, cx),
             Screen::Settings => self.render_settings(window, cx),

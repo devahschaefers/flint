@@ -390,6 +390,10 @@ impl FlintApp {
         cx.notify();
     }
 
+    pub fn dev_set_reply_mode(&mut self, mode: ReplyMode, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_reply_mode(mode, window, cx);
+    }
+
     /// Escape steps down: slash menu → fullscreen → collapsed. True when consumed.
     pub fn reply_escape(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(t) = self.thread() else { return false };

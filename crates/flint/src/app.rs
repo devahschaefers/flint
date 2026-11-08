@@ -224,6 +224,8 @@ pub struct FlintApp {
     pub search: Option<SearchState>,
     pub composer: Option<ComposerState>,
     pub startup_error: Option<String>,
+    /// Debug builds: screen to open once data arrives (see dev.rs)
+    pub dev_open: Option<String>,
 }
 
 impl FlintApp {
@@ -271,6 +273,7 @@ impl FlintApp {
             search: None,
             composer: None,
             startup_error: None,
+            dev_open: if cfg!(debug_assertions) { std::env::var("FLINT_OPEN").ok() } else { None },
         };
         app.init(cx);
         app

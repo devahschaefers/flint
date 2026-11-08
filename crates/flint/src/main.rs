@@ -4,6 +4,7 @@
 
 mod app;
 mod assets;
+mod dev;
 mod theme;
 mod util;
 mod views;
