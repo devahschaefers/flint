@@ -978,6 +978,14 @@ impl FlintApp {
     }
 
     pub fn on_new_message(&mut self, _: &NewMessage, window: &mut Window, cx: &mut Context<Self>) {
+        if self.search.is_some() {
+            if self.compose_target().is_some() {
+                // Search advertises ⌘N as "Compose to …"
+                self.search_compose(window, cx);
+                return;
+            }
+            self.close_search(window, cx);
+        }
         // Inert while composing: re-opening would wipe unsaved edits
         if self.composer.is_none() && self.connected() {
             self.open_compose(None, None, window, cx);

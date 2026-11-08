@@ -233,6 +233,19 @@ pub fn editor_surface(state: &Entity<TextareaState>) -> Div {
         .child(gpui_kit::base::Textarea::new(state))
 }
 
+/// `editor_surface` for a fixed area: the text fills its parent and scrolls itself
+pub fn editor_surface_fill(state: &Entity<TextareaState>) -> Div {
+    div()
+        .size_full()
+        .px(px(16.))
+        .pt(px(8.))
+        .pb(px(14.))
+        .text_size(px(13.5))
+        .line_height(px(23.))
+        .text_color(c(BODY))
+        .child(gpui_kit::base::Textarea::new(state))
+}
+
 pub fn word_count(text: &str) -> usize {
     text.split_whitespace().count()
 }

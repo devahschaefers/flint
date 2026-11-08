@@ -70,6 +70,7 @@ pub fn bounded_popover_panel(width: f32, max_height: Pixels) -> Stateful<Div> {
         .id("popover-panel")
         .max_h(max_height)
         .overflow_y_scroll()
+        .restrict_scroll_to_axis()
 }
 
 /// The floating panel used by the header menu, the filter, and context menus

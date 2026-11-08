@@ -26,6 +26,8 @@ pub struct SearchState {
     pub results: Vec<SearchResult>,
     pub selected: usize,
     pub loading: bool,
+    /// The results list; its children are the "Conversations" label, then one per row
+    scroll: ScrollHandle,
     seq: u64,
     _debounce: Option<Task<()>>,
     _subs: Vec<Subscription>,
@@ -62,6 +64,7 @@ impl FlintApp {
             results: Vec::new(),
             selected: 0,
             loading: false,
+            scroll: ScrollHandle::new(),
             seq: 0,
             _debounce: None,
             _subs: vec![sub],
@@ -116,7 +119,7 @@ impl FlintApp {
     }
 
     /// To the top result's counterpart, or to a typed address
-    fn compose_target(&self) -> Option<(String, String)> {
+    pub fn compose_target(&self) -> Option<(String, String)> {
         let search = self.search.as_ref()?;
         if let Some(top) = search.results.first().and_then(|r| r.thread.counterpart.clone()) {
             let name = self.contacts.resolve(&top).name;
@@ -128,10 +131,14 @@ impl FlintApp {
     fn search_open_result(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(r) = self.search.as_ref().and_then(|s| s.results.get(ix)).map(|r| r.thread.thread_ref()) else { return };
         self.close_search(window, cx);
+        // The composer fills the window, so it has to go for the thread to show
+        if self.composer_put_away(window, cx) {
+            self.show_toast("Saved to Drafts", None, cx);
+        }
         self.open_thread(r, window, cx);
     }
 
-    fn search_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn search_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((to, _)) = self.compose_target() else { return };
         self.close_search(window, cx);
         if self.composer.is_none() {
@@ -142,6 +149,7 @@ impl FlintApp {
     pub fn on_search_up(&mut self, _: &SearchUp, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(s) = self.search.as_mut() {
             s.selected = s.selected.saturating_sub(1);
+            s.scroll.scroll_to_item(s.selected + 1);
             cx.notify();
         }
     }
@@ -149,6 +157,7 @@ impl FlintApp {
     pub fn on_search_down(&mut self, _: &SearchDown, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(s) = self.search.as_mut() {
             s.selected = (s.selected + 1).min(s.results.len().saturating_sub(1));
+            s.scroll.scroll_to_item(s.selected + 1);
             cx.notify();
         }
     }
@@ -178,9 +187,10 @@ impl FlintApp {
         let contacts = self.contacts.clone();
         let cap = |s: &str| div().px(px(18.)).pt(px(8.)).pb(px(2.)).text_size(px(10.)).text_color(c(HINT)).child(s.to_uppercase());
 
-        let mut list = div().id("search-results").min_h_0().overflow_y_scroll();
+        let mut list = div().id("search-results").min_h_0().overflow_y_scroll().restrict_scroll_to_axis().track_scroll(&search.scroll);
         if active && !results.is_empty() {
-            let mut rows = div().px(px(10.)).pb(px(8.));
+            list = list.child(cap("Conversations"));
+            let n = results.len();
             for (i, r) in results.iter().enumerate() {
                 let t = &r.thread;
                 let mailbox = t.counterpart.clone().or_else(|| t.latest.to.first().cloned()).unwrap_or_else(|| t.latest.from.clone());
@@ -189,7 +199,7 @@ impl FlintApp {
                 let subject = Some(normalize_subject(if r.matched.subject.is_empty() { &t.subject } else { &r.matched.subject }))
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "(no subject)".into());
-                rows = rows.child(
+                list = list.child(div().px(px(10.)).when(i + 1 == n, |d| d.pb(px(8.))).child(
                     div()
                         .id(("search-row", i))
                         .flex()
@@ -229,9 +239,8 @@ impl FlintApp {
                                 .child(div().min_w_0().truncate().text_color(c(QUIET)).child(subject)),
                         )
                         .child(div().flex_shrink_0().whitespace_nowrap().text_size(px(11.5)).text_color(c(LABEL)).child(short_date(t.latest_date_ms))),
-                );
+                ));
             }
-            list = list.child(cap("Conversations")).child(rows);
         }
         if active && results.is_empty() && !loading {
             list = list.child(

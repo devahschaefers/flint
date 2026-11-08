@@ -587,7 +587,7 @@ impl FlintApp {
 
         let editor_box = div()
             .id("reply-editor")
-            .overflow_y_scroll()
+            .overflow_y_scroll().restrict_scroll_to_axis()
             .when(full, |d| d.flex_1().min_h_0())
             .when(!full, |d| match custom {
                 Some(h) => d.h(h),
@@ -606,7 +606,7 @@ impl FlintApp {
             .bg(c(PANEL))
             .key_context("Compose")
             // When the wrapped toolbar leaves no room, scroll rather than crush the editor
-            .when(full, |d| d.flex_1().min_h_0().overflow_y_scroll())
+            .when(full, |d| d.flex_1().min_h_0().overflow_y_scroll().restrict_scroll_to_axis())
             .when(!full, |d| d.shadow(vec![BoxShadow { color: hsla(0., 0., 0., 0.25), offset: point(px(0.), px(4.)), blur_radius: px(15.), spread_radius: px(0.), inset: false, }]))
             // Drag-resize handle along the top edge
             .when(!full, |d| {

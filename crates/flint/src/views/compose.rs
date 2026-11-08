@@ -7,7 +7,7 @@ use crate::app::*;
 use crate::theme::*;
 use crate::util::identity::{format_address_list, parse_address_list};
 use crate::util::mailhtml::html_to_markdown;
-use crate::views::editor::{self, editor_surface, slash_active, slash_menu, toolbar};
+use crate::views::editor::{self, editor_surface_fill, slash_active, slash_menu, toolbar};
 use crate::views::root::parse_hex;
 use crate::views::widgets::*;
 use flint_core::*;
@@ -144,14 +144,22 @@ impl FlintApp {
             editor::apply_slash(&body, editor::EditOp::Paragraph, window, cx);
             return;
         }
+        self.composer_put_away(window, cx);
+    }
+
+    /// Close the composer now: saved as a draft if anything was typed, a draft
+    /// deleted if it was emptied. True when a draft was saved.
+    pub fn composer_put_away(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(comp) = &self.composer else { return false };
         if comp.has_content() {
             self.composer_save_draft(window, cx);
-        } else {
-            if let Some(d) = &comp.draft {
-                self.delete_draft(d.account_id.clone(), d.message_id_hdr.clone().unwrap_or_default(), cx);
-            }
-            self.close_composer_ui(window, cx);
+            return true;
         }
+        if let Some(d) = &comp.draft {
+            self.delete_draft(d.account_id.clone(), d.message_id_hdr.clone().unwrap_or_default(), cx);
+        }
+        self.close_composer_ui(window, cx);
+        false
     }
 
     pub fn composer_save_draft(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -196,6 +204,7 @@ impl FlintApp {
         let from_menu = comp.from_menu;
         let (to, subject, body) = (comp.to.clone(), comp.subject.clone(), comp.body.clone());
         let slash = slash_active(body.read(cx));
+        let words = self.show_word_count.then(|| editor::word_count(&comp.body_text));
 
         let field_row = |content: AnyElement| div().flex_shrink_0().border_b_1().border_color(c(LINE)).px(px(16.)).child(content);
         let input_box = |state: &Entity<InputState>| {
@@ -267,7 +276,8 @@ impl FlintApp {
             });
 
         let chips = (!recipients.is_empty()).then(|| {
-            div().flex().flex_wrap().gap(px(6.)).pb(px(10.)).children(recipients.iter().map(|m| {
+            // Capped so a long list can't push the subject, body and Send out of the card
+            div().id("compose-chips").flex().flex_wrap().gap(px(6.)).pb(px(10.)).max_h(px(96.)).overflow_y_scroll().restrict_scroll_to_axis().children(recipients.iter().map(|m| {
                 let id = contacts.resolve(m);
                 div()
                     .flex()
@@ -295,6 +305,8 @@ impl FlintApp {
             .min_h_0()
             .flex()
             .flex_col()
+            // A short window or high zoom scrolls the card instead of losing the footer
+            .overflow_y_scroll().restrict_scroll_to_axis()
             .rounded(px(14.))
             .border_1()
             .border_color(c(EDGE))
@@ -329,8 +341,10 @@ impl FlintApp {
                 div()
                     .relative()
                     .flex_1()
-                    .min_h(px(180.))
-                    .child(div().id("compose-editor").size_full().overflow_y_scroll().pt(px(6.)).child(editor_surface(&body)))
+                    .min_h(px(96.))
+                    .flex()
+                    .flex_col()
+                    .child(div().flex_1().min_h_0().overflow_hidden().pt(px(6.)).child(editor_surface_fill(&body)))
                     .when(slash, |d| d.child(div().absolute().left(px(16.)).top(px(36.)).child(slash_menu("compose-slash", &body)))),
             )
             .child(
@@ -344,10 +358,10 @@ impl FlintApp {
                     .px(px(16.))
                     .pt(px(12.))
                     .pb(px(16.))
-                    .child(primary_button("compose-send", "Send", can_send, Box::new(cx.listener(|this, _, window, cx| this.composer_send(window, cx)))))
-                    .child(quiet_button("compose-save", "Save draft", has_content, Box::new(cx.listener(|this, _, window, cx| this.composer_save_draft(window, cx)))))
+                    .child(primary_button("compose-send", "Send", can_send, Box::new(cx.listener(|this, _, window, cx| this.composer_send(window, cx)))).flex_none())
+                    .child(quiet_button("compose-save", "Save draft", has_content, Box::new(cx.listener(|this, _, window, cx| this.composer_save_draft(window, cx)))).flex_none())
                     .child(spacer())
-                    .child(div().text_size(px(11.)).text_color(c(HINT)).child(editor::hint(None))),
+                    .child(div().min_w_0().truncate().text_size(px(11.)).text_color(c(HINT)).child(editor::hint(words))),
             );
 
         Some(
