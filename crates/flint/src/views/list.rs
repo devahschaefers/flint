@@ -33,9 +33,9 @@ impl FlintApp {
         (self.viewport.height - px(24.)).max(px(1.))
     }
 
-    /// 9% of the window, widening only when interface zoom would otherwise put
-    /// the page under the icon strip (18 left + 28 wide + 18 clear)
-    fn page_gutter(&self) -> Pixels {
+    /// Left margin: 9% of the window, widening only when interface zoom would
+    /// otherwise put the page under the icon strip (18 left + 28 wide + 18 clear)
+    fn page_left_gutter(&self) -> Pixels {
         (self.viewport.width * 0.09).max(px(64.))
     }
 
@@ -48,7 +48,8 @@ impl FlintApp {
             .track_scroll(&self.scroll)
             .child(
                 div()
-                    .px(self.page_gutter())
+                    .pl(self.page_left_gutter())
+                    .pr(relative(0.09))
                     .pt(px(if tight { 26. } else { 32. }))
                     .pb(px(if tight { 48. } else { 60. }))
                     .child(content),
@@ -301,11 +302,12 @@ impl FlintApp {
                 d.child(
                     div()
                         .id("account-chip")
-                        // The address gives way before the unread count does
+                        // The address gives way before the unread count does,
+                        // but the pill always holds its padding and its ✕
                         .flex()
                         .items_center()
                         .gap(px(4.))
-                        .min_w_0()
+                        .min_w(px(36.))
                         .rounded_full()
                         .px(px(9.))
                         .py(px(2.))

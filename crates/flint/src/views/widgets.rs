@@ -198,6 +198,7 @@ pub fn pill() -> Div {
     div()
         .flex()
         .items_center()
+        .min_w_0()
         .gap(px(12.))
         .rounded(px(20.))
         .border_1()
@@ -220,6 +221,7 @@ pub fn pill() -> Div {
 pub fn pill_button(id: impl Into<ElementId>, label: impl Into<SharedString>, primary: bool, on_click: OnClick) -> Stateful<Div> {
     div()
         .id(id)
+        .flex_none()
         .rounded(px(6.))
         .px(px(8.))
         .py(px(3.))

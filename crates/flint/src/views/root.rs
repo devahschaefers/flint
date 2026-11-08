@@ -215,12 +215,13 @@ impl FlintApp {
                 .bottom(px(if lifted { 74. } else { 26. }))
                 .left_0()
                 .right_0()
+                .px(px(12.))
                 .flex()
                 .justify_center()
                 .child(
                     pill()
                         .occlude()
-                        .child(toast.text.clone())
+                        .child(div().min_w_0().truncate().child(toast.text.clone()))
                         .when_some(undo, |d, undo| {
                             d.child(pill_button(
                                 "toast-undo",
@@ -258,13 +259,14 @@ impl FlintApp {
                 .bottom(px(26.))
                 .left_0()
                 .right_0()
+                .px(px(12.))
                 .flex()
                 .justify_center()
                 .child(
                     pill()
                         .occlude()
-                        .child(div().size(px(6.)).rounded_full().bg(c(if parked > 0 { DANGER } else { WARN })))
-                        .child(summary)
+                        .child(div().flex_none().size(px(6.)).rounded_full().bg(c(if parked > 0 { DANGER } else { WARN })))
+                        .child(div().min_w_0().truncate().child(summary))
                         .child(pill_button("outbox-retry", "Retry", true, Box::new(cx.listener(|this, _, _, cx| this.retry_outbox(cx)))))
                         .child(pill_button("outbox-discard", "Discard", false, Box::new(cx.listener(|this, _, _, cx| this.discard_outbox(cx))))),
                 )
