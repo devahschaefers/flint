@@ -5,11 +5,11 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
 
 ## Open
 
-- **Medium** — GPUI app: compose is a Markdown text area, not the TipTap rich editor. The
+- **Medium** — GPUI app: compose is a Markdown text area, not a rich editor. The
   toolbar and `/` menu write Markdown (`# `, `- `, `**…**`, fences), converted to the
   text/html part on send; there is no live formatting and no selection bubble menu. Drafts
-  written by the Electron editor are converted back to Markdown on open (lossy for markup the
-  converter doesn't know). `crates/flint/src/views/editor.rs`, `util/mailhtml.rs`.
+  saved as rich HTML by older builds are converted back to Markdown on open (lossy for markup
+  the converter doesn't know). `crates/flint/src/views/editor.rs`, `util/mailhtml.rs`.
 - ~~**Medium** — GPUI app: mail HTML goes through GPUI Kit's text view, a document renderer,
   not a browser. Layout tables are flattened to blocks, CSS is ignored, and inline `<code>` is
   unwrapped to plain text because the text view (0.9) paints it as a box over the whole
@@ -24,7 +24,7 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   mail is checked with an injected wheel event, since computer use can't send horizontal
   scrolls; a real trackpad hasn't exercised it. `crates/flint/src/views/thread.rs`.
 - **Low** — GPUI app: mail that sets a dark text color without its own background reads dark
-  on the dark ground (the Electron app had the same problem). Needs a contrast pass, or a
+  on the dark ground. Needs a contrast pass, or a
   light page behind such mail. `crates/flint/src/views/mailview.rs`.
 - **Low** — GPUI app: Blitz is slow in debug builds (100–300 ms per message, first one
   includes system font loading); `cargo run -p flint --release` is the fast path.
@@ -35,41 +35,38 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   macOS asks again for access to the "flint Safe Storage" keychain item after each build.
 - **Low** — GPUI app: the CSS spinner, enter/fade transitions and the drag-region cursor are
   not reproduced (a static ring marks in-flight sends). `crates/flint/src/views/widgets.rs`.
-- **Medium** — Schema migrations run synchronously in `initDb` before any window is shown:
+- **Medium** — Schema migrations run synchronously in `Store::open` before any window is shown:
   the v1→v2 table rebuild was ~15 s on a 1 GB database, and v2→v3 adds the FTS build
   (~1.5 s) plus a one-off `VACUUM` of the whole file. A splash/progress window, or running
-  migrations off the main thread, would hide it. `src/main/db.ts`.
+  migrations off the main thread, would hide it. `crates/flint-core/src/db/mod.rs`.
 - **Medium** — Attachments are skipped entirely; a message with only an attachment looks
-  empty. Needs part metadata + on-demand download. `src/main/google/gmail.ts`.
+  empty. Needs part metadata + on-demand download. `crates/flint-core/src/google/gmail.rs`.
 - **Medium** — List queries scale with the mailbox, not the page. Every thread-list page and
   the smart-inbox overview aggregate all messages in scope (GROUP BY, then filter/sort/limit):
   50–100 ms per page on 21k conversations, re-run on every mail change and every scroll page.
-  `listContacts` walks every row (40 ms) on each change too. Linear in messages, so ~6 more
+  `list_contacts` walks every row (40 ms) on each change too. Linear in messages, so ~6 more
   accounts of similar size means 0.4–0.7 s per page and a sluggish "All accounts" view. Fix:
   a maintained `threads` table (and a `contacts` table) updated on message writes, so a page
-  is an index range read regardless of size. `src/main/queries.ts`.
+  is an index range read regardless of size. `crates/flint-core/src/queries.rs`.
 - **Low** — Full resync after history expiry fetches at most 2,000 newest missing messages
   (`RESYNC_NEW_CAP`); a longer gap leaves holes until the next pass. It also still fetches
-  them with `format=full` rather than metadata-first like backfill. `src/main/sync.ts`.
-- **Low** — A build still on schema v2 (any worktree behind main) that opens the shared
+  them with `format=full` rather than metadata-first like backfill. `crates/flint-core/src/sync.rs`.
+- ~~**Low** — A build still on schema v2 (any worktree behind main) that opens the shared
   `mail.db` writes `user_version = 2` back and stores new mail as plain TEXT without FTS
-  entries; it also reads compacted bodies as raw BLOBs. The next v3 start re-runs the v3
-  step (index rebuild over every row, then VACUUM: a few seconds on the 22k mailbox), so
-  nothing is lost, but AGENTS.md's one-instance rule matters more now that the schema
-  differs across worktrees. `src/main/db.ts`.
-- **Low** — `WireMessage` carries no `bodyState`, so the renderer cannot tell an empty body
-  from one not fetched yet. Threads fetch on open (`mail:thread` → `ensureBodies`), so the
-  gap only shows while a fresh account's phase-2 backfill is still running.
-  `src/preload/index.d.ts`, `src/main/db.ts`.
+  entries; it also reads compacted bodies as raw BLOBs.~~ Those Electron builds are gone. `31e9e75`
+- **Low** — `WireMessage` carries no body state, so the UI cannot tell an empty body from
+  one not fetched yet. Threads fetch on open, so the gap only shows while a fresh account's
+  phase-2 backfill is still running. `crates/flint-core/src/types.rs`.
 - **Low** — Delta sync polls every 60 s regardless of window focus. Shorten when focused,
-  back off when not. `src/main/sync.ts`.
-- **Low** — `hasOwnReply` counts draft replies as answering the parent, while
-  `cancelSend(asDraft)` un-answers it. Pick one. `src/main/db.ts`, `src/main/outbox.ts`.
-- **Low** — The IPC sender check's rejection paths (foreign frame / other origin) are
-  verified by reading only; nothing in the app can produce such a sender to test against.
-  `src/main/validate.ts`.
+  back off when not. `crates/flint-core/src/sync.rs`.
+- **Low** — `has_own_reply` counts draft replies as answering the parent, while
+  `cancel_send(as_draft)` un-answers it. Pick one. `crates/flint-core/src/db/`,
+  `crates/flint-core/src/outbox.rs`.
+- ~~**Low** — The IPC sender check's rejection paths (foreign frame / other origin) are
+  verified by reading only; nothing in the app can produce such a sender to test against.~~
+  The IPC layer went with the Electron app. `31e9e75`
 - **Low** — The reply composer never shows who it is replying to until sent.
-  `src/renderer/src/components/compose/ReplyComposer.tsx`.
+  `crates/flint/src/views/thread.rs`.
 
 ## Fixed
 

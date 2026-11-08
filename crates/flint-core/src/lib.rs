@@ -82,7 +82,7 @@ impl Store {
         Ok(Arc::new(Store { db: Arc::new(Db::open(path, clock, secrets)?) }))
     }
 
-    /// The query layer underneath (every db.ts/queries.ts function, for tools and tests)
+    /// The query layer underneath, for tools and tests
     pub fn db(&self) -> &Arc<Db> {
         &self.db
     }
