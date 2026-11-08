@@ -17,6 +17,7 @@ impl Render for FlintApp {
         }
         #[cfg(feature = "screenshots")]
         self.dev_schedule_shot(window, cx);
+        self.viewport = window.viewport_size();
         let page = match &self.view {
             Screen::Thread(_) => self.render_thread(window, cx),
             Screen::Settings => self.render_settings(window, cx),
@@ -176,7 +177,7 @@ impl FlintApp {
 
     fn render_filter_popover(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let active = self.active_account.clone();
-        let mut panel = popover_panel(220.)
+        let mut panel = bounded_popover_panel(220., self.popover_max_height())
             .child(popover_label("Filter"))
             .child(
                 popover_item("filter-all", active.is_none(), Box::new(cx.listener(|this, _, w, cx| this.set_account(None, w, cx))))
@@ -273,7 +274,7 @@ impl FlintApp {
 
     fn render_context_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.context_menu.as_ref()?;
-        let mut panel = popover_panel(190.).text_color(c(MUTED));
+        let mut panel = bounded_popover_panel(190., self.popover_max_height()).text_color(c(MUTED));
         for (i, entry) in menu.entries.iter().enumerate() {
             panel = match entry {
                 MenuEntry::Separator => panel.child(popover_divider()),

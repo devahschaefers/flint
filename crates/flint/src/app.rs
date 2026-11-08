@@ -222,6 +222,10 @@ pub struct FlintApp {
     pub html: flint_html::HtmlWorker,
     pub focus: FocusHandle,
     pub scroll: ScrollHandle,
+    /// The list a thread or Settings was opened from, restored on the way back
+    saved_list: Option<(Screen, ListPage, ScrollHandle)>,
+    /// Window content size, refreshed at the top of every render
+    pub viewport: Size<Pixels>,
 
     pub view: Screen,
     pub prev_view: Option<Screen>,
@@ -281,6 +285,8 @@ impl FlintApp {
             html: flint_html::HtmlWorker::spawn(),
             focus,
             scroll: ScrollHandle::new(),
+            saved_list: None,
+            viewport: window.viewport_size(),
             view: Screen::Inbox,
             prev_view: None,
             popover: None,
@@ -584,6 +590,19 @@ impl FlintApp {
         self.popover = None;
         self.context_menu = None;
         self.hovered_row = None;
+        // Keep loaded pages as well as the offset, so returning to a deep row
+        // does not clamp the scroll position to the first page's height.
+        if Self::remembers(&self.view) && !Self::remembers(&view) {
+            let old = std::mem::replace(&mut self.page, PageState::List(ListPage::new()));
+            if let PageState::List(list) = old {
+                self.saved_list = Some((self.view.clone(), list, self.scroll.clone()));
+            }
+        }
+        let restored = if Self::remembers(&view) {
+            self.saved_list.take().filter(|(screen, _, _)| screen == &view)
+        } else {
+            None
+        };
         self.page = match &view {
             Screen::Thread(r) => PageState::Thread(Box::new(ThreadState::new(r.clone(), self, window, cx))),
             Screen::Settings => PageState::Settings(SettingsState::new(self, window, cx)),
@@ -591,6 +610,10 @@ impl FlintApp {
         };
         self.view = view;
         self.scroll = ScrollHandle::new();
+        if let Some((_, list, scroll)) = restored {
+            self.page = PageState::List(list);
+            self.scroll = scroll;
+        }
         if self.composer.is_none() && self.search.is_none() {
             window.focus(&self.focus, cx);
         }
@@ -651,6 +674,7 @@ impl FlintApp {
     pub fn set_account(&mut self, account: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         self.active_account = account;
         self.popover = None;
+        self.saved_list = None; // its rows belong to the previous account
         self.load_shared(cx);
         let view = self.view.clone();
         let prev = self.prev_view.clone();

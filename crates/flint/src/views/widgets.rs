@@ -64,6 +64,14 @@ pub fn row_action(id: impl Into<ElementId>, label: impl Into<SharedString>, acce
         .child(label.into())
 }
 
+/// A popover panel that scrolls rather than running off a short window
+pub fn bounded_popover_panel(width: f32, max_height: Pixels) -> Stateful<Div> {
+    popover_panel(width)
+        .id("popover-panel")
+        .max_h(max_height)
+        .overflow_y_scroll()
+}
+
 /// The floating panel used by the header menu, the filter, and context menus
 pub fn popover_panel(width: f32) -> Div {
     div()

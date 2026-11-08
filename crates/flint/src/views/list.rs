@@ -28,6 +28,17 @@ impl FlintApp {
         cx.notify();
     }
 
+    /// Tallest a popover can be and still fit inside its 12px window margin
+    pub fn popover_max_height(&self) -> Pixels {
+        (self.viewport.height - px(24.)).max(px(1.))
+    }
+
+    /// 9% of the window, widening only when interface zoom would otherwise put
+    /// the page under the icon strip (18 left + 28 wide + 18 clear)
+    fn page_gutter(&self) -> Pixels {
+        (self.viewport.width * 0.09).max(px(64.))
+    }
+
     /// The one layout: a scrolling column with generous side margins and no chrome
     pub fn page(&self, id: &'static str, tight: bool, content: impl IntoElement) -> AnyElement {
         div()
@@ -37,7 +48,7 @@ impl FlintApp {
             .track_scroll(&self.scroll)
             .child(
                 div()
-                    .px(relative(0.09))
+                    .px(self.page_gutter())
                     .pt(px(if tight { 26. } else { 32. }))
                     .pb(px(if tight { 48. } else { 60. }))
                     .child(content),
@@ -263,6 +274,7 @@ impl FlintApp {
             .child(
                 div()
                     .relative()
+                    .flex_none()
                     .child(
                         div()
                             .id("header-title")
@@ -289,6 +301,11 @@ impl FlintApp {
                 d.child(
                     div()
                         .id("account-chip")
+                        // The address gives way before the unread count does
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .min_w_0()
                         .rounded_full()
                         .px(px(9.))
                         .py(px(2.))
@@ -298,16 +315,19 @@ impl FlintApp {
                         .text_size(px(11.))
                         .text_color(c(ACCENT_LIGHT))
                         .on_click(cx.listener(|this, _, window, cx| this.set_account(None, window, cx)))
-                        .child(format!("{} ✕", a.email)),
+                        .child(div().min_w_0().truncate().child(a.email.clone()))
+                        .child(div().flex_none().child("✕")),
                 )
             })
             .child(spacer())
-            .when_some(right, |d, r| d.child(div().whitespace_nowrap().text_size(px(12.)).text_color(c(META)).child(r)))
+            .when_some(right, |d, r| {
+                d.child(div().flex_none().whitespace_nowrap().text_size(px(12.)).text_color(c(META)).child(r))
+            })
     }
 
     fn header_menu(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let view = self.view.clone();
-        let mut panel = popover_panel(240.)
+        let mut panel = bounded_popover_panel(240., self.popover_max_height())
             .child(popover_label("Go to"))
             .child(
                 popover_item("menu-inbox", view == Screen::Inbox, Box::new(cx.listener(|this, _, w, cx| this.go_inbox(w, cx))))
