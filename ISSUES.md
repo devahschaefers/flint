@@ -10,11 +10,20 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   text/html part on send; there is no live formatting and no selection bubble menu. Drafts
   written by the Electron editor are converted back to Markdown on open (lossy for markup the
   converter doesn't know). `crates/flint/src/views/editor.rs`, `util/mailhtml.rs`.
-- **Medium** — GPUI app: mail HTML goes through GPUI Kit's text view, a document renderer,
+- ~~**Medium** — GPUI app: mail HTML goes through GPUI Kit's text view, a document renderer,
   not a browser. Layout tables are flattened to blocks, CSS is ignored, and inline `<code>` is
   unwrapped to plain text because the text view (0.9) paints it as a box over the whole
   paragraph. Newsletters read as a single column of text and images.
-  `crates/flint/src/util/mailhtml.rs`.
+  `crates/flint/src/util/mailhtml.rs`.~~ Replaced by the Blitz renderer (688df86).
+- **Medium** — GPUI app: HTML bodies are painted images (Blitz → pixels), so their text
+  can't be selected or copied, links show no pointer cursor or hover state, and there is no
+  find-in-message. Hit-testing already works (clicks open links), so selection is the next
+  step. `crates/flint/src/views/mailview.rs`, `crates/flint-html`.
+- **Low** — GPUI app: mail that sets a dark text color without its own background reads dark
+  on the dark ground (the Electron app had the same problem). Needs a contrast pass, or a
+  light page behind such mail. `crates/flint/src/views/mailview.rs`.
+- **Low** — GPUI app: Blitz is slow in debug builds (100–300 ms per message, first one
+  includes system font loading); `cargo run -p flint --release` is the fast path.
 - **Low** — GPUI app: lists render every loaded row (a scrolling div, 50 rows per page
   fetched as you near the bottom) rather than a virtualized list; long scroll sessions grow
   the frame cost. `crates/flint/src/views/list.rs`.

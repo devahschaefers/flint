@@ -13,7 +13,7 @@ copy of itself) is running, since two outbox workers on one database could send 
 ## GPUI build
 
 ```bash
-cargo run -p flint                 # the app, on your real mailbox
+cargo run -p flint --release       # the app, on your real mailbox (debug builds render mail slowly)
 cargo test -p flint-core -p flint  # tests never touch the real mailbox
 
 # Look at the UI on made-up mail instead of yours
