@@ -12,6 +12,7 @@ use crate::app::*;
 use crate::theme::*;
 use crate::zoom::px;
 use flint_html::{Fetcher, HtmlWorker, RenderOptions};
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use std::cell::Cell;
 use std::io::Read;
@@ -65,6 +66,8 @@ pub struct HtmlBody {
     image: Option<Arc<RenderImage>>,
     /// Rendered content height, CSS px
     height: f32,
+    /// Painted width, CSS px (past the column when the mail is fixed-width)
+    content_width: f32,
     blocked: usize,
     shown: Option<Target>,
     in_flight: Option<Target>,
@@ -80,6 +83,7 @@ impl HtmlBody {
             html: html.into(),
             image: None,
             height: 0.0,
+            content_width: 0.0,
             blocked: 0,
             shown: None,
             in_flight: None,
@@ -135,10 +139,10 @@ fn to_render_image(mut rgba: Vec<u8>, width: u32, height: u32) -> Option<Arc<Ren
 
 impl FlintApp {
     /// Width of a message body column in logical pixels: the page minus its
-    /// 9% margins, minus the avatar and its gap
+    /// margins, minus the avatar and its gap
     pub fn body_width(&self, window: &Window) -> Pixels {
         let page = window.viewport_size().width;
-        (page * 0.82 - px(40.)).max(gpui_kit::px(200.))
+        (page - self.page_left_gutter() - page * 0.09 - px(40.)).max(gpui_kit::px(200.))
     }
 
     /// Kick a render when the body is missing or stale for `target`
@@ -160,7 +164,7 @@ impl FlintApp {
             };
             worker.render(doc_id, html.to_string(), opts).map(|p| {
                 let image = to_render_image(p.rgba, p.pixel_width, p.pixel_height);
-                (image, p.height, p.blocked)
+                (image, p.height, p.content_width, p.blocked)
             })
         });
         cx.spawn(async move |this, cx| {
@@ -169,9 +173,10 @@ impl FlintApp {
                 let Some(body) = this.html_body_mut(&key) else { return };
                 body.in_flight = None;
                 match result {
-                    Ok((Some(image), height, blocked)) => {
+                    Ok((Some(image), height, content_width, blocked)) => {
                         body.image = Some(image);
                         body.height = height;
+                        body.content_width = content_width;
                         body.blocked = blocked;
                         body.shown = Some(target);
                     }
@@ -202,17 +207,19 @@ impl FlintApp {
         let image = body.image.clone()?;
         let shown = body.shown?;
         // Keep the last frame up (stretched to the new width) until its re-render lands
-        let logical_h = gpui_kit::px(body.height * zoom * (f32::from(width) / (shown.width * zoom)).max(0.01));
+        let stretch = (f32::from(width) / (shown.width * zoom)).max(0.01);
+        let logical_h = gpui_kit::px(body.height * zoom * stretch);
+        let logical_w = gpui_kit::px(body.content_width * zoom * stretch);
         let bounds = body.bounds.clone();
         let paint_bounds = bounds.clone();
         let doc_id = body.doc_id;
-        let rendered_width = shown.width;
+        let rendered_width = body.content_width;
+        let overflows = body.content_width > shown.width;
 
-        Some(
-            div()
+        let page = div()
                 .id(("mail-html", doc_id as usize))
                 .relative()
-                .w(width)
+                .w(logical_w)
                 .h(logical_h)
                 .child(img(ImageSource::Render(image)).size_full())
                 .child(
@@ -239,7 +246,16 @@ impl FlintApp {
                         }
                     })
                     .detach();
-                }))
+                }));
+
+        // Restricted to its axis, or GPUI would turn vertical wheel movement
+        // over wide mail into sideways scrolling and strand the page
+        Some(
+            div()
+                .id(("mail-html-scroll", doc_id as usize))
+                .w(width)
+                .when(overflows, |d| d.overflow_x_scroll().restrict_scroll_to_axis())
+                .child(page)
                 .into_any_element(),
         )
     }

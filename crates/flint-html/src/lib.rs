@@ -39,6 +39,8 @@ pub struct Painted {
     pub pixel_height: u32,
     /// Content height in CSS pixels
     pub height: f32,
+    /// Painted width in CSS pixels: the column, or more for mail that overflows it
+    pub content_width: f32,
     /// Remote resources refused (0 when remote content was allowed)
     pub blocked: usize,
 }
@@ -122,6 +124,9 @@ fn base64_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Widest body painted, in CSS pixels, so a hostile width can't exhaust memory
+const MAX_CONTENT_WIDTH: f32 = 4000.0;
+
 /// A laid-out message body
 pub struct MailDocument {
     doc: HtmlDocument,
@@ -173,13 +178,27 @@ impl MailDocument {
         (layout.size.height + layout.margin.top + layout.margin.bottom).max(1.0).ceil()
     }
 
+    /// Width to paint in CSS pixels. Layout stays at the column width so mail
+    /// that can reflow does; fixed-width mail that overflows gets the rest.
+    pub fn content_width(&self) -> f32 {
+        let base: &BaseDocument = &self.doc;
+        let layout = base.root_element().final_layout();
+        let right = layout.size.width.max(layout.scrollable_overflow_rect.right);
+        if right <= self.width + 1.0 {
+            self.width
+        } else {
+            right.ceil().min(MAX_CONTENT_WIDTH)
+        }
+    }
+
     pub fn blocked(&self) -> usize {
         self.net.blocked.load(Ordering::Relaxed)
     }
 
     pub fn paint(&mut self) -> Painted {
         let height = self.height();
-        let pw = (self.width * self.scale).ceil().max(1.0) as u32;
+        let content_width = self.content_width();
+        let pw = (content_width * self.scale).ceil().max(1.0) as u32;
         let ph = (height * self.scale).ceil().max(1.0) as u32;
         let scale = self.scale as f64;
         let base = self.base();
@@ -188,7 +207,7 @@ impl MailDocument {
             pw,
             ph,
         );
-        Painted { rgba, pixel_width: pw, pixel_height: ph, height, blocked: self.blocked() }
+        Painted { rgba, pixel_width: pw, pixel_height: ph, height, content_width, blocked: self.blocked() }
     }
 
     /// The link under a point (CSS pixels from the body's top-left), if any
@@ -310,6 +329,16 @@ mod tests {
         let worker = HtmlWorker::spawn();
         let painted = worker.render(2, "<img src='https://t.example/p.gif' width=1 height=1><p>hi</p>".into(), opts()).unwrap();
         assert_eq!(painted.blocked, 1);
+    }
+
+    #[test]
+    fn paints_fixed_width_mail_past_the_column() {
+        let worker = HtmlWorker::spawn();
+        let html = "<body style='margin:0'><div style='width:1800px;height:20px;background:#ff0000'></div></body>";
+        let painted = worker.render(3, html.into(), opts()).unwrap();
+        assert_eq!(painted.content_width, 1800.0);
+        assert_eq!(painted.pixel_width, 1800);
+        assert_eq!(painted.rgba[1700 * 4], 255, "the part past the column is painted");
     }
 
     #[test]

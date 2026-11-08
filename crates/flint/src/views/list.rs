@@ -35,7 +35,7 @@ impl FlintApp {
 
     /// Left margin: 9% of the window, widening only when interface zoom would
     /// otherwise put the page under the icon strip (18 left + 28 wide + 18 clear)
-    fn page_left_gutter(&self) -> Pixels {
+    pub fn page_left_gutter(&self) -> Pixels {
         (self.viewport.width * 0.09).max(px(64.))
     }
 
