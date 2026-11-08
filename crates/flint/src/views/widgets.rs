@@ -4,6 +4,7 @@
 use crate::theme::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use crate::zoom::px;
 
 pub type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 

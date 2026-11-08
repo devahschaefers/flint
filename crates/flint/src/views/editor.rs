@@ -8,6 +8,7 @@
 use crate::theme::*;
 use gpui_kit::base::input::TextareaState;
 use gpui_kit::*;
+use crate::zoom::px;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditOp {

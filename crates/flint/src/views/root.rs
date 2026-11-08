@@ -8,6 +8,7 @@ use crate::views::widgets::*;
 use flint_core::{OpKind, OpState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use crate::zoom::px;
 
 impl Render for FlintApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -35,6 +36,9 @@ impl Render for FlintApp {
             .on_action(cx.listener(Self::on_go_drafts))
             .on_action(cx.listener(Self::on_go_sent))
             .on_action(cx.listener(Self::on_send))
+            .on_action(cx.listener(Self::on_zoom_in))
+            .on_action(cx.listener(Self::on_zoom_out))
+            .on_action(cx.listener(Self::on_zoom_reset))
             .on_action(cx.listener(Self::on_search_up))
             .on_action(cx.listener(Self::on_search_down))
             .on_action(cx.listener(Self::on_search_enter))

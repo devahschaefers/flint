@@ -36,6 +36,9 @@ actions!(
         SearchUp,
         SearchDown,
         SearchEnter,
+        ZoomIn,
+        ZoomOut,
+        ZoomReset,
     ]
 );
 
@@ -56,6 +59,19 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("up", SearchUp, Some("Search > Input")),
         KeyBinding::new("down", SearchDown, Some("Search > Input")),
         KeyBinding::new("enter", SearchEnter, Some("Search > Input")),
+    ]);
+    // Zoom: ⌘ on macOS, Super on Linux (both are GPUI's `cmd`), Ctrl on Windows.
+    // Global (no context) so it works inside text fields too.
+    #[cfg(target_os = "windows")]
+    let keys = ["ctrl-=", "ctrl-+", "ctrl-shift-=", "ctrl--", "ctrl-0"];
+    #[cfg(not(target_os = "windows"))]
+    let keys = ["cmd-=", "cmd-+", "cmd-shift-=", "cmd--", "cmd-0"];
+    cx.bind_keys([
+        KeyBinding::new(keys[0], ZoomIn, None),
+        KeyBinding::new(keys[1], ZoomIn, None),
+        KeyBinding::new(keys[2], ZoomIn, None),
+        KeyBinding::new(keys[3], ZoomOut, None),
+        KeyBinding::new(keys[4], ZoomReset, None),
     ]);
 }
 
@@ -187,6 +203,7 @@ const TOAST_MS: u64 = 3200;
 pub const SETTING_SIGNATURE: &str = "signature";
 pub const SETTING_HIDE_DONE: &str = "hide_done";
 pub const SETTING_WORD_COUNT: &str = "show_word_count";
+pub const SETTING_ZOOM: &str = "zoom";
 
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -223,6 +240,7 @@ pub struct FlintApp {
     toast_seq: u64,
     pub context_menu: Option<ContextMenu>,
     pub hovered_row: Option<(&'static str, usize)>,
+    zoom_save: Option<Task<()>>,
 
     pub page: PageState,
     pub search: Option<SearchState>,
@@ -276,6 +294,7 @@ impl FlintApp {
             toast_seq: 0,
             context_menu: None,
             hovered_row: None,
+            zoom_save: None,
             page: PageState::List(ListPage::new()),
             search: None,
             composer: None,
@@ -359,6 +378,9 @@ impl FlintApp {
                     this.hide_done = settings.get(SETTING_HIDE_DONE).map(|v| v != "false").unwrap_or(true);
                     this.show_word_count =
                         settings.get(SETTING_WORD_COUNT).map(|v| v != "false").unwrap_or(true);
+                    if let Some(z) = settings.get(SETTING_ZOOM).and_then(|v| v.parse::<f32>().ok()) {
+                        crate::zoom::set_zoom(z);
+                    }
                     if let Some(active) = &this.active_account {
                         if !accounts.iter().any(|a| &a.id == active) {
                             this.active_account = None;
@@ -948,6 +970,33 @@ impl FlintApp {
 
     pub fn on_go_sent(&mut self, _: &GoSent, window: &mut Window, cx: &mut Context<Self>) {
         self.folder_shortcut(FolderView::Sent, window, cx);
+    }
+
+    /// Saved once the keys settle, so a burst of presses can't land out of order
+    fn apply_zoom(&mut self, _zoom: f32, cx: &mut Context<Self>) {
+        self.zoom_save = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(400)).await;
+            this.update(cx, |this, cx| {
+                this.persist_setting(SETTING_ZOOM, crate::zoom::zoom().to_string(), cx)
+            })
+            .ok();
+        }));
+        cx.notify();
+    }
+
+    pub fn on_zoom_in(&mut self, _: &ZoomIn, _: &mut Window, cx: &mut Context<Self>) {
+        let z = crate::zoom::step(1);
+        self.apply_zoom(z, cx);
+    }
+
+    pub fn on_zoom_out(&mut self, _: &ZoomOut, _: &mut Window, cx: &mut Context<Self>) {
+        let z = crate::zoom::step(-1);
+        self.apply_zoom(z, cx);
+    }
+
+    pub fn on_zoom_reset(&mut self, _: &ZoomReset, _: &mut Window, cx: &mut Context<Self>) {
+        let z = crate::zoom::set_zoom(1.0);
+        self.apply_zoom(z, cx);
     }
 
     pub fn on_send(&mut self, _: &SendMessage, window: &mut Window, cx: &mut Context<Self>) {

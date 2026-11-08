@@ -14,6 +14,7 @@ use flint_core::*;
 use gpui_kit::base::input::{InputEvent, InputState, TextareaState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use crate::zoom::px;
 
 pub struct ComposerState {
     /// The draft being edited; None for a new message

@@ -11,6 +11,7 @@ use flint_core::*;
 use gpui_kit::base::input::{InputEvent, InputState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use crate::zoom::px;
 use std::time::Duration;
 
 const MIN_QUERY: usize = 2;

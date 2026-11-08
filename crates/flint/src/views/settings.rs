@@ -9,6 +9,7 @@ use flint_core::*;
 use gpui_kit::base::input::{InputEvent, TextareaState};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use crate::zoom::px;
 use std::time::Duration;
 
 pub struct SettingsState {

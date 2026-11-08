@@ -10,6 +10,7 @@ mod single;
 mod theme;
 mod util;
 mod views;
+mod zoom;
 
 use app::FlintApp;
 use flint_core::{Engine, Store};

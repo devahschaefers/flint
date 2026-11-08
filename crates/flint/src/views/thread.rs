@@ -18,6 +18,7 @@ use gpui_kit::base::input::{InputEvent, TextareaState};
 use gpui_kit::base::text::{TextView, TextViewStyle};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use crate::zoom::px;
 use std::collections::HashSet;
 use std::rc::Rc;
 

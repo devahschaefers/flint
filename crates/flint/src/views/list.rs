@@ -12,6 +12,7 @@ use crate::views::widgets::*;
 use flint_core::*;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use crate::zoom::px;
 use std::rc::Rc;
 
 impl FlintApp {

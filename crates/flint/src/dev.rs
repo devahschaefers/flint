@@ -6,6 +6,7 @@
 use crate::app::*;
 use crate::views::thread::ReplyMode;
 use gpui_kit::*;
+use crate::zoom::px;
 
 impl FlintApp {
     pub fn dev_open_pending(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -44,6 +45,23 @@ impl FlintApp {
             "mode" => {
                 let mode = if arg == "1" { ReplyMode::Open } else { ReplyMode::Full };
                 self.dev_set_reply_mode(mode, window, cx);
+            }
+            // Space-separated keystrokes through the real dispatcher, e.g. "keys:cmd-= cmd-="
+            "keys" => {
+                let keys: Vec<String> = arg.split_whitespace().map(String::from).collect();
+                cx.spawn_in(window, async move |_, cx| {
+                    for k in keys {
+                        let source: &'static str = Box::leak(k.clone().into_boxed_str());
+                        let parsed = Keystroke::parse(source).map_err(|e| e.to_string());
+                        match parsed {
+                            Ok(ks) => {
+                                cx.update(|window, cx| window.dispatch_keystroke(ks, cx)).ok();
+                            }
+                            Err(err) => log::warn!("FLINT_OPEN keys: {k}: {err}"),
+                        }
+                    }
+                })
+                .detach();
             }
             "compose" => self.open_compose(None, None, window, cx),
             "draft" => self.open_folder(FolderView::Drafts, window, cx),
