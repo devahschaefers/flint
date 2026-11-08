@@ -45,6 +45,8 @@ impl FlintApp {
             .id(id)
             .size_full()
             .overflow_y_scroll()
+            // GPUI otherwise turns a sideways swipe into vertical page movement
+            .restrict_scroll_to_axis()
             .track_scroll(&self.scroll)
             .child(
                 div()
