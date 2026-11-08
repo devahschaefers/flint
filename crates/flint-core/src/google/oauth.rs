@@ -1,4 +1,4 @@
-//! OAuth 2.0 for native apps (port of `src/main/google/oauth.ts`, RFC 8252):
+//! OAuth 2.0 for native apps (RFC 8252):
 //! PKCE + loopback redirect on an ephemeral 127.0.0.1 port, the system
 //! browser for the Google sign-in, then token exchange and the userinfo
 //! fetch. [`RefreshTokenAuth`] keeps access tokens fresh from the stored

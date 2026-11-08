@@ -1,6 +1,6 @@
-//! Refresh-token sealing, readable and writable by both apps. The Electron
-//! app stores `accounts.refresh_token` as `enc:<base64>` (Electron
-//! `safeStorage`) or `plain:<token>` when encryption is unavailable.
+//! Refresh-token sealing. `accounts.refresh_token` holds `enc:<base64>`, or
+//! `plain:<token>` when encryption is unavailable. The format is Electron's
+//! `safeStorage`, kept so accounts connected by the old Electron app still work.
 //!
 //! On macOS `safeStorage` is Chromium's OSCrypt: ciphertext is `v10` +
 //! AES-128-CBC with PKCS#7 padding, IV = 16 spaces, key =
@@ -81,8 +81,8 @@ fn unseal_with(key: impl FnOnce() -> Option<[u8; 16]>, stored: &str) -> Result<S
     Ok(stored.strip_prefix("plain:").unwrap_or(stored).to_string())
 }
 
-/// Encryption unavailable: everything is stored `plain:` (what the Electron
-/// test setup does, and the fallback when there is no keychain)
+/// Encryption unavailable: everything is stored `plain:` (the fallback
+/// when there is no keychain, and what tests use)
 pub struct PlainSecrets;
 
 impl SecretBox for PlainSecrets {
@@ -114,7 +114,7 @@ impl SecretBox for FixedKeySecrets {
     }
 }
 
-/// The real thing: the Electron app's keychain item, read (or created) on
+/// The real thing: the app's keychain item, read (or created) on
 /// first use and cached for the life of the process
 pub struct KeychainSecrets {
     /// None until first use; Some(None) once the keychain proved unavailable

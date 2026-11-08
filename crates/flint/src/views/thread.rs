@@ -2,8 +2,7 @@
 //! Gmail first) and re-fetched on every mail change. Older messages fold to
 //! one line; HTML bodies are sanitized with remote images blocked until the
 //! reader asks. The reply composer at the end has three layers: a quiet pill,
-//! a docked card (drag-resizable), and fullscreen. Port of ThreadView.tsx and
-//! ReplyComposer.tsx.
+//! a docked card (drag-resizable), and fullscreen.
 
 use crate::app::*;
 use crate::theme::*;
@@ -719,7 +718,7 @@ fn plain_body(text: &str) -> Div {
 }
 
 fn html_view(id: impl Into<ElementId>, html: String) -> impl IntoElement {
-    // The `.rt` rules from tokens.css; the defaults are GPUI's light palette
+    // The app's reading styles; the defaults are GPUI's light palette
     let code_block = StyleRefinement::default()
         .bg(c(BG))
         .border_1()

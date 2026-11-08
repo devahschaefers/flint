@@ -1,4 +1,4 @@
-//! Per-account Gmail sync, the read side (port of `src/main/sync.ts`).
+//! Per-account Gmail sync, the read side.
 //!
 //! Initial backfill walks the whole mailbox newest-first with a resumable
 //! page-token checkpoint in two phases: metadata first (headers, labels,

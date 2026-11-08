@@ -1,7 +1,6 @@
 //! Thread lists: the smart inbox (bundles + important conversations), one
 //! bundle opened as a list, and the folder lists (Pins, Drafts, Sent, Trash,
-//! Spam, Archive). Port of InboxView, GroupListView, FolderListView,
-//! ListHeader, BundleRow, ThreadRow, DraftRow, SendStatus.
+//! Spam, Archive).
 
 use crate::app::*;
 use crate::theme::*;

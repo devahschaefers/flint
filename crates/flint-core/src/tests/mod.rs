@@ -1,5 +1,5 @@
-//! Ports of the vitest suites in `src/main/__tests__/`, plus the helpers
-//! they share (`helpers.ts`). Every test opens its own database in a temp
+//! The store, sync and outbox test suites, plus the helpers they share.
+//! Every test opens its own database in a temp
 //! directory; nothing here touches the real mailbox or the keychain.
 
 mod db_tests;

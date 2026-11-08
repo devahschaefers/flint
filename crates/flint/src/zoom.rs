@@ -1,5 +1,5 @@
-//! Interface zoom (⌘ + / − / 0; Super on Linux, Ctrl on Windows), like the
-//! Electron app's page zoom. GPUI has no page-level zoom, so every size in
+//! Interface zoom (⌘ + / − / 0; Super on Linux, Ctrl on Windows). GPUI has
+//! no page-level zoom, so every size in
 //! the views goes through this `px`, which shadows GPUI's own `px` by being
 //! imported explicitly. Window chrome (traffic lights, minimum size) stays put.
 

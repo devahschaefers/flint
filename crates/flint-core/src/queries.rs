@@ -1,4 +1,4 @@
-//! Read queries the UI's lists are built from (port of `src/main/queries.ts`).
+//! Read queries the UI's lists are built from.
 //! Everything is computed in SQL over the messages table, grouped by
 //! `thread_key`. No body column is read, so nothing is decompressed for a list.
 
@@ -18,7 +18,7 @@ const SEARCH_MESSAGE_CAP: i64 = 2000;
 const OWN_ADDRESSES: &str = "(SELECT LOWER(email) FROM accounts)";
 
 /// Per-conversation aggregates plus the newest message's display fields
-/// (queries.ts threadsSql, unchanged). `innerFilter` narrows the aggregated messages.
+/// `inner_filter` narrows the aggregated messages.
 fn threads_sql(inner_filter: &str) -> String {
     format!(
         "

@@ -1,5 +1,5 @@
 //! Settings: accounts (add via browser sign-in, remove, sync progress),
-//! preferences, signature, about. Port of SettingsView.tsx.
+//! preferences, signature, about.
 
 use crate::app::*;
 use crate::theme::*;

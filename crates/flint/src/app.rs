@@ -1,6 +1,5 @@
 //! The app: navigation, shared state, data loading, and every mail action.
-//! A port of `src/renderer/src/store.ts` plus the view-level data hooks
-//! (`useMailQuery`, `useThreadPages`). Mail is never held here beyond what
+//! Mail is never held here beyond what
 //! the current screen shows; each screen asks the store for exactly that and
 //! asks again whenever the engine reports a change (`mail_version` ticks).
 //!

@@ -1,6 +1,6 @@
 //! ⌘K: full-text search over every folder (FTS5 in the store, best match
 //! first), keyboard-first, with a "Compose to …" shortcut. Every open starts
-//! empty. Port of SearchOverlay.tsx.
+//! empty.
 
 use crate::app::*;
 use crate::theme::*;

@@ -1,5 +1,4 @@
 //! Flint's Google OAuth client, baked in so sign-in works out of the box
-//! (copied from `src/main/google/clientDefaults.ts`).
 //!
 //! Committing these is safe and standard for open-source desktop apps: for a
 //! "Desktop app" OAuth client Google's docs state the client secret is not

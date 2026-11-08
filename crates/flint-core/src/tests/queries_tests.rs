@@ -1,4 +1,4 @@
-//! queries.test.ts: thread lists, the smart inbox overview, search,
+//! Thread lists, the smart inbox overview, search,
 //! contacts, unread counts, and thread-action resolution
 
 use super::*;

@@ -186,7 +186,7 @@ fn fresh_database_goes_straight_to_current_version() {
     db.put_local_message(&li, "<local@x>", &mbox(Some("Me"), "me@example.com"), MessageState::Draft, Folder::Drafts, None)
         .unwrap();
     assert_eq!(db.get_local_message("a", "<local@x>").unwrap().unwrap().gmail_id, None);
-    // WAL and the journal size limit are set like the Electron app sets them
+    // WAL and the journal size limit are set
     let raw = Connection::open(t.path()).unwrap();
     let mode: String = raw.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
     assert_eq!(mode, "wal");
@@ -521,7 +521,7 @@ fn refresh_tokens_are_sealed_and_read_back() {
     let stored: String = raw.query_row("SELECT refresh_token FROM accounts WHERE id = 'a'", [], |r| r.get(0)).unwrap();
     assert!(stored.starts_with("enc:"));
     assert_eq!(db.get_refresh_token("a").unwrap().as_deref(), Some("1//tok"));
-    // A row the Electron app wrote without encryption reads back too
+    // A row written without encryption reads back too
     raw.execute("UPDATE accounts SET refresh_token = 'plain:abc' WHERE id = 'a'", []).unwrap();
     assert_eq!(db.get_refresh_token("a").unwrap().as_deref(), Some("abc"));
 }

@@ -1,4 +1,4 @@
-//! "The local store changed" push to the UI (port of `src/main/notify.ts`).
+//! "The local store changed" push to the UI.
 //! Sync traffic is throttled (trailing edge) so backfill pages don't spam the
 //! UI; user-initiated writes go out immediately.
 

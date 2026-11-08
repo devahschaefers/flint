@@ -1,5 +1,5 @@
 //! Turn what a person typed into a search box into an FTS5 MATCH expression
-//! that cannot fail to parse (port of `src/main/storage/search.ts`). Every
+//! that cannot fail to parse. Every
 //! term is emitted as a quoted FTS5 string, so operators and syntax are
 //! looked up as words. A trailing `*` makes a term a prefix query, and a run
 //! inside double quotes is one phrase. Terms are ANDed.

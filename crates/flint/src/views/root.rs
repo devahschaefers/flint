@@ -1,6 +1,5 @@
 //! The window: drag band, the strip under the traffic lights, the current
 //! page, and the overlays (outbox banner, composer, search, toast, menus).
-//! Port of `App.tsx`, `Strip.tsx`, `Toast.tsx`, `OutboxBanner.tsx`.
 
 use crate::app::*;
 use crate::theme::*;

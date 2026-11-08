@@ -1,5 +1,4 @@
-//! Display identity and addresses, ported from `lib/identity.ts`,
-//! `lib/address.ts`, and `lib/threads.ts`.
+//! Display identity and addresses.
 //!
 //! Names resolve as real clients do: contact name > the display name on the
 //! message > the bare address (never a name made up from the address).
@@ -98,7 +97,7 @@ pub fn normalize_subject(subject: &str) -> String {
     PREFIX.replace(subject, "").trim().to_string()
 }
 
-// ---------- RFC 5322 address lists (lib/address.ts) ----------
+// ---------- RFC 5322 address lists ----------
 
 pub fn is_valid_address(address: &str) -> bool {
     static RE: LazyLock<Regex> =

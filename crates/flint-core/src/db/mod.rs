@@ -1,8 +1,6 @@
-//! Local mail store (port of `src/main/db.ts`). SQLite is the source of truth
+//! Local mail store. SQLite is the source of truth
 //! for everything the app knows: synced mail, locally-authored mail, the
-//! outbox of operations still owed to Gmail, and user settings. Same file,
-//! same schema, same `user_version` as the Electron app, which may open the
-//! database too. Dates are unix ms.
+//! outbox of operations still owed to Gmail, and user settings. Dates are unix ms.
 //!
 //! Connections: one writer behind a mutex, plus a small pool of read
 //! connections (WAL lets them read while the writer commits), so a list query
@@ -129,7 +127,7 @@ const VACUUM_FREE_MIN_BYTES: i64 = 8 * 1024 * 1024;
 
 /// Idle read connections kept around
 const MAX_IDLE_READERS: usize = 4;
-/// The Electron app may hold the write lock; wait for it rather than fail
+/// Another connection may hold the write lock; wait for it rather than fail
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Throws when the linked SQLite is too old for the schema
@@ -482,7 +480,7 @@ impl Db {
         })
     }
 
-    /// Stored sealed the way Electron's safeStorage does (`enc:` / `plain:`)
+    /// Stored sealed (`enc:` / `plain:`, see secrets.rs)
     pub fn save_refresh_token(&self, account_id: &str, token: &str) -> Result<()> {
         let stored = self.secrets.seal(token);
         self.write(|c| {

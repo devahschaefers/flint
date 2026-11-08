@@ -1,5 +1,4 @@
-//! Design tokens, lifted from `src/renderer/src/styles/tokens.css` (the flat
-//! "dead simple" language: one ink ground, whitespace instead of rules, one
+//! Design tokens (the flat "dead simple" language: one ink ground, whitespace instead of rules, one
 //! blue accent, avatars as the only ornament).
 
 #![allow(dead_code)]

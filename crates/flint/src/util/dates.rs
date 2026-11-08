@@ -1,4 +1,4 @@
-//! Date labels for lists, ported from `src/renderer/src/lib/dates.ts`.
+//! Date labels for lists.
 //! All arithmetic is in local calendar days, Monday-based weeks.
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike};

@@ -3,14 +3,13 @@
 //! Display (`sanitize_for_display`): a message's text/html part is
 //! attacker-controlled, so it goes through ammonia (an allowlist sanitizer):
 //! scripts, styles, forms, event handlers and unknown tags go; links keep
-//! only http/https/mailto. Remote images are blocked by default, like the
-//! Electron app: an `<img>` whose src is not `data:`/`cid:` is removed and
+//! only http/https/mailto. Remote images are blocked by default: an `<img>` whose src is not `data:`/`cid:` is removed and
 //! counted, so the thread view can offer "Load images". Layout tables are
 //! flattened into blocks, since the text view lays tables out as data grids
 //! and nearly every table in mail is layout.
 //!
 //! Compose: the GPUI editor is a plain text area where the user writes the
-//! same Markdown shortcuts the TipTap editor accepted (`#`, `-`, `1.`, `>`,
+//! usual Markdown shortcuts (`#`, `-`, `1.`, `>`,
 //! fences, `**bold**`). `markdown_to_html` makes the text/html part,
 //! `markdown_to_text` the text/plain part, and `html_to_markdown` turns a
 //! stored draft's HTML back into editable text.
@@ -178,7 +177,7 @@ pub fn markdown_to_text(md: &str) -> String {
     BLANKS.replace_all(out.trim(), "\n\n").into_owned()
 }
 
-/// Stored draft HTML (ours, or the TipTap editor's) back to editable Markdown.
+/// Stored draft HTML (ours, or an older build's rich editor) back to editable Markdown.
 /// Handles the tags the editors produce; anything else contributes its text.
 pub fn html_to_markdown(html: &str) -> String {
     static TOKEN: LazyLock<Regex> =
@@ -387,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn tiptap_html_to_markdown() {
+    fn rich_editor_html_to_markdown() {
         let md = html_to_markdown(
             "<p>Hi &amp; bye</p><ol><li><p>a</p></li><li><p>b</p></li></ol><pre><code>x = 1</code></pre><p><a href=\"https://x.io\">x</a></p>",
         );

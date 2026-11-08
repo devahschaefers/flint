@@ -606,7 +606,7 @@ fn pages_freed_by_compaction_are_vacuumed_at_the_next_start() {
 
 #[test]
 fn text_rows_and_node_style_frames_decode_side_by_side() {
-    // A row the Electron app compressed (a standard zstd frame with a checksum)
+    // A row compressed by an earlier build (a standard zstd frame with a checksum)
     // next to a plain TEXT row: both read back through the store
     let (dir, store) = migrated(1);
     let path = dir.path().join("mail.db");

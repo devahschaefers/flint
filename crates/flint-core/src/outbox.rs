@@ -1,4 +1,4 @@
-//! Persisted queue of everything we owe Gmail (port of `src/main/outbox.ts`):
+//! Persisted queue of everything we owe Gmail:
 //! label actions, sends, and draft pushes. Every user intent is written to
 //! SQLite first and drained here with backoff. Transient failures keep an op
 //! pending; permanent ones park it as failed until the user retries or

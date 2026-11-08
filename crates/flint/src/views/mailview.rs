@@ -1,7 +1,6 @@
 //! A message's text/html part, rendered by flint-html (Blitz) on its worker
 //! thread and shown as an image. Unstyled mail gets the app's reading look
-//! from a user-agent stylesheet (the old `.rt` rules); mail that styles
-//! itself keeps its own design, as it did in the Electron app.
+//! from a user-agent stylesheet; mail that styles itself keeps its own design.
 //!
 //! Each body renders at its column width × (screen scale × zoom), again
 //! when that changes, and again when the reader loads remote images. Clicks

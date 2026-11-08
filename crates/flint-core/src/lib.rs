@@ -1,9 +1,9 @@
-//! Flint's backend, ported from the Electron main process (`src/main`).
+//! Flint's backend: the mail store, Gmail sync, and the outbox.
 //!
 //! Two handles make up the public surface the GPUI app uses:
 //!
-//! - [`Store`]: the SQLite mail store (same file and schema as the Electron
-//!   app: `~/Library/Application Support/flint/mail.db`, `user_version` 4).
+//! - [`Store`]: the SQLite mail store
+//!   (`~/Library/Application Support/flint/mail.db`, `user_version` 4).
 //!   Every read the UI makes goes through it. Reads use their own WAL read
 //!   connections, so they never wait on sync writes. Safe to call from any
 //!   thread; calls block, so the UI runs them on a background executor.
@@ -53,8 +53,7 @@ pub struct Store {
 }
 
 impl Store {
-    /// `~/Library/Application Support/flint/mail.db` (the Electron app's
-    /// userData file), or `$FLINT_DB` when set.
+    /// `~/Library/Application Support/flint/mail.db`, or `$FLINT_DB` when set.
     pub fn default_path() -> PathBuf {
         if let Some(p) = std::env::var_os("FLINT_DB").filter(|p| !p.is_empty()) {
             return PathBuf::from(p);
@@ -69,7 +68,7 @@ impl Store {
     }
 
     /// Open (or create) the store and bring it to the current schema.
-    /// Refresh tokens are sealed with the Electron app's keychain key (read
+    /// Refresh tokens are sealed with the app's keychain key (read
     /// lazily, on the first token read or write).
     pub fn open(path: &Path) -> Result<Arc<Store>> {
         Store::open_with(path, clock::system(), Arc::new(secrets::KeychainSecrets::default()))
@@ -92,12 +91,12 @@ impl Store {
         self.db.list_accounts()
     }
 
-    /// One page of conversations, newest first, keyset-paged (queries.ts listThreads)
+    /// One page of conversations, newest first, keyset-paged
     pub fn list_threads(&self, query: &ThreadQuery) -> Result<ThreadPage> {
         self.db.list_threads(query)
     }
 
-    /// The smart inbox's bundle rows (queries.ts inboxOverview)
+    /// The smart inbox's bundle rows
     pub fn inbox_overview(&self, account_id: Option<&str>, include_archived: bool) -> Result<InboxOverview> {
         self.db.inbox_overview(account_id, include_archived)
     }

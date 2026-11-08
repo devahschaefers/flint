@@ -1,4 +1,4 @@
-//! The facade the UI codes against (ipc.ts's handlers): blocking calls from
+//! The facade the UI codes against: blocking calls from
 //! a plain thread, the change callback, and the mapping onto sync/outbox.
 
 use super::*;
@@ -113,7 +113,7 @@ fn engine_clones_share_one_runtime_and_drop_cleanly() {
 }
 
 #[test]
-fn default_path_is_the_electron_user_data_file() {
+fn default_path_is_the_app_support_file() {
     if std::env::var_os("FLINT_DB").is_none() {
         let p = Store::default_path();
         if cfg!(target_os = "macos") {

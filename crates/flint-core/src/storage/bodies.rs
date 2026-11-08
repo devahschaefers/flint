@@ -1,5 +1,5 @@
 //! Body codec: how `messages.body_text` / `messages.body_html` are stored
-//! (port of `src/main/storage/bodies.ts`).
+//!.
 //!
 //! Every row carries a `body_codec` naming the codec both of its bodies were
 //! written with. `'none'` rows hold plain TEXT (the pre-v3 shape); `'zstd'`
@@ -15,7 +15,7 @@ use rusqlite::ToSql;
 /// What new rows are written with
 pub const DEFAULT_CODEC: &str = "zstd";
 
-/// zstd level (see bodies.ts for the measurements behind 9)
+/// zstd level
 const ZSTD_LEVEL: i32 = 9;
 
 /// A body value as SQLite holds it

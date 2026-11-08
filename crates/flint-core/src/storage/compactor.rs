@@ -1,4 +1,4 @@
-//! Background body compaction (port of `src/main/storage/compactor.ts`).
+//! Background body compaction.
 //! Rows on a stale codec are re-encoded a batch at a time on a timer.
 //! Nothing is remembered between runs: each batch asks the store what is
 //! left, so the job is resumable across restarts and idempotent. It stops

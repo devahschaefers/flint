@@ -1,4 +1,4 @@
-//! Outgoing RFC 822 construction (port of `src/main/mime.ts`) via
+//! Outgoing RFC 822 construction via
 //! mail-builder: encodings, multipart/alternative, and header folding are
 //! its problem. We set our own Message-ID so the copy Gmail hands back can
 //! be matched to the local row it came from.

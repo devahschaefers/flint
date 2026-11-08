@@ -1,8 +1,6 @@
 //! The compose editor shared by the reply composer and New Message: a text
 //! area holding Markdown, the glyph toolbar above it, and the `/` insert
-//! menu. Port of Toolbar.tsx / RichEditor.tsx onto a plain text area: the
-//! toolbar writes the Markdown the TipTap editor accepted as input rules
-//! (`# `, `- `, `1. `, `> `, fences, `**bold**`), and sending converts it
+//! menu. The toolbar writes Markdown (`# `, `- `, `1. `, `> `, fences, `**bold**`), and sending converts it
 //! to the text/html part (see util::mailhtml).
 
 use crate::theme::*;

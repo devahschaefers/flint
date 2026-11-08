@@ -1,4 +1,4 @@
-//! Gmail REST v1 (port of `src/main/google/gmail.ts`): the [`GmailApi`]
+//! Gmail REST v1: the [`GmailApi`]
 //! trait the sync engine and outbox code against, a hand-written reqwest
 //! client implementing it, and the message parsing pipeline.
 //!

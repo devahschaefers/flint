@@ -1,4 +1,4 @@
-//! Google: the Gmail REST client and OAuth (port of `src/main/google`).
+//! Google: the Gmail REST client and OAuth.
 
 pub mod client_defaults;
 pub mod gmail;

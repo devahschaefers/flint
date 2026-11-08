@@ -1,4 +1,4 @@
-//! Plain text out of an HTML mail body (port of `src/main/storage/htmlToText.ts`).
+//! Plain text out of an HTML mail body.
 //! Good enough for search indexing and a fallback rendering; not a layout engine.
 //!
 //! Steps: drop comments and the contents of script/style/head/noscript/

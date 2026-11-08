@@ -1,11 +1,9 @@
-//! Wire types shared by the store, the engine, and the UI. A 1:1 port of
-//! `src/preload/index.d.ts`: the same shapes the Electron renderer consumed,
-//! so the two apps can be read side by side. Times are unix ms (`i64`).
+//! Wire types shared by the store, the engine, and the UI. Times are unix
+//! ms (`i64`).
 //!
 //! The serde attributes matter only where a value is persisted as JSON in
 //! SQLite (mailboxes in `to_json`/`cc_json`/`reply_to_json`, op payloads):
-//! those must stay byte-compatible with what the Electron app writes, because
-//! both apps open the same database.
+//! those must stay byte-compatible with the rows already in the database.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -73,7 +71,7 @@ impl MailAction {
     }
 }
 
-/// Lifecycle of a message row (see the TS doc comment in preload/index.d.ts)
+/// Lifecycle of a message row
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageState {

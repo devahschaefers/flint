@@ -1,6 +1,6 @@
-//! The persisted outbox queue (db.ts "outbox"). Payloads are JSON with the
-//! same keys the Electron app writes (`gmailIds`, `action`, `value`,
-//! `messageIdHdr`, `gmailDraftId`, `gmailId`), since both apps may drain it.
+//! The persisted outbox queue. Payloads are JSON with stable keys (`gmailIds`,
+//! `action`, `value`, `messageIdHdr`, `gmailDraftId`, `gmailId`), since
+//! operations already queued in the database must still drain.
 
 use super::Db;
 use crate::types::{OpKind, OpState, WireOp};

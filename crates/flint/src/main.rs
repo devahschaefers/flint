@@ -1,6 +1,5 @@
-//! Flint, the GPUI build. Same mailbox as the Electron app (it opens the same
-//! SQLite store), drawn natively. Never run both apps at once: they would
-//! both sync and both drain the outbox.
+//! Flint: opens the SQLite mail store, starts sync, and draws the app with
+//! GPUI. Only one copy may run at a time (see single.rs).
 
 mod app;
 mod assets;

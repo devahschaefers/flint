@@ -1,7 +1,6 @@
 //! New Message: a full window with one card, opened from the strip (⌘N), a
 //! draft, or search's "Compose to …". Closing saves a draft when anything was
-//! typed, or deletes the draft when every field was cleared. Port of
-//! ComposerModal.tsx.
+//! typed, or deletes the draft when every field was cleared.
 
 use crate::app::*;
 use crate::theme::*;
