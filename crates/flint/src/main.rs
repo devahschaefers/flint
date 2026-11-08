@@ -5,6 +5,7 @@
 mod app;
 mod assets;
 mod dev;
+mod http;
 mod theme;
 mod util;
 mod views;
@@ -29,7 +30,10 @@ fn main() {
         let _ = tx.unbounded_send(());
     });
 
-    gpui_kit::application().with_assets(assets::Assets).run(move |cx: &mut App| {
+    gpui_kit::application()
+        .with_assets(assets::Assets)
+        .with_http_client(std::sync::Arc::new(http::ImageFetcher::new()))
+        .run(move |cx: &mut App| {
         gpui_kit::init(cx);
         app::bind_keys(cx);
         cx.on_window_closed(|cx, _| {
