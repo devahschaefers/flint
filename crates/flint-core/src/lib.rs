@@ -208,12 +208,9 @@ impl Engine {
         Engine { inner: Arc::new(EngineInner { store, runtime: Some(runtime), sync, outbox, compactor }) }
     }
 
+    #[cfg(test)]
     pub(crate) fn sync_engine(&self) -> &Arc<SyncEngine> {
         &self.inner.sync
-    }
-
-    pub(crate) fn outbox(&self) -> &Arc<Outbox> {
-        &self.inner.outbox
     }
 
     fn block_on<F: std::future::Future>(&self, f: F) -> F::Output {

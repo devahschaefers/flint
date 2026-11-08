@@ -619,10 +619,10 @@ pub fn extract_bodies(part: Option<&MessagePart>) -> Bodies {
             *cal = true;
         }
         let data = p.body.as_ref().and_then(|b| b.data.as_deref()).filter(|d| !d.is_empty());
-        if mime == "text/plain" && text.is_empty() && data.is_some() {
-            *text = decode_part_data(data.unwrap());
-        } else if mime == "text/html" && html.is_none() && data.is_some() {
-            *html = Some(decode_part_data(data.unwrap()));
+        match data {
+            Some(d) if mime == "text/plain" && text.is_empty() => *text = decode_part_data(d),
+            Some(d) if mime == "text/html" && html.is_none() => *html = Some(decode_part_data(d)),
+            _ => {}
         }
         for child in p.parts.iter().flatten() {
             walk(child, text, html, cal);
