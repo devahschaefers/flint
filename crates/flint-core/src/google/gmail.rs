@@ -97,8 +97,9 @@ pub struct DraftRef {
 pub trait GmailApi: Send + Sync {
     async fn get_profile(&self) -> GResult<Profile>;
     async fn list_message_ids(&self, page_token: Option<&str>, opts: ListOpts) -> GResult<IdPage>;
-    /// Every message id carrying a label (or every id at all), across pages
-    async fn list_all_message_ids(&self, label_ids: Option<Vec<String>>) -> GResult<HashSet<String>>;
+    /// Every message id carrying a label (or every id at all), across pages,
+    /// deduplicated, in listing order (newest first, like the TS Set)
+    async fn list_all_message_ids(&self, label_ids: Option<Vec<String>>) -> GResult<Vec<String>>;
     /// Gmail id of a message by its Message-ID header
     async fn find_by_message_id(&self, message_id_hdr: &str) -> GResult<Option<String>>;
     /// Full fetch; None when the message no longer exists
@@ -340,8 +341,9 @@ impl GmailApi for GmailClient {
         })
     }
 
-    async fn list_all_message_ids(&self, label_ids: Option<Vec<String>>) -> GResult<HashSet<String>> {
-        let mut ids = HashSet::new();
+    async fn list_all_message_ids(&self, label_ids: Option<Vec<String>>) -> GResult<Vec<String>> {
+        let mut seen = HashSet::new();
+        let mut ids = Vec::new();
         let mut token: Option<String> = None;
         loop {
             let page = self
@@ -350,7 +352,7 @@ impl GmailApi for GmailClient {
                     ListOpts { label_ids: label_ids.clone(), max_results: Some(500), q: None },
                 )
                 .await?;
-            ids.extend(page.ids);
+            ids.extend(page.ids.into_iter().filter(|id| seen.insert(id.clone())));
             token = page.next_page_token;
             if token.is_none() {
                 return Ok(ids);
