@@ -605,7 +605,8 @@ impl FlintApp {
             .border_color(c(EDGE))
             .bg(c(PANEL))
             .key_context("Compose")
-            .when(full, |d| d.flex_1().min_h_0())
+            // When the wrapped toolbar leaves no room, scroll rather than crush the editor
+            .when(full, |d| d.flex_1().min_h_0().overflow_y_scroll())
             .when(!full, |d| d.shadow(vec![BoxShadow { color: hsla(0., 0., 0., 0.25), offset: point(px(0.), px(4.)), blur_radius: px(15.), spread_radius: px(0.), inset: false, }]))
             // Drag-resize handle along the top edge
             .when(!full, |d| {
@@ -645,11 +646,12 @@ impl FlintApp {
                     })))
                     .child(corner("reply-close", "✕").on_click(cx.listener(|this, _, window, cx| this.set_reply_mode(ReplyMode::Collapsed, window, cx)))),
             )
-            .child(div().pl(px(10.)).pr(px(80.)).pt(px(12.)).pb(px(2.)).child(toolbar("reply-tb", &reply)))
+            .child(div().flex_none().pl(px(10.)).pr(px(80.)).pt(px(12.)).pb(px(2.)).child(toolbar("reply-tb", &reply)))
             .child(
                 div()
                     .relative()
-                    .when(full, |d| d.flex_1().min_h_0().flex().flex_col())
+                    // At least two lines of text at any zoom
+                    .when(full, |d| d.flex_1().min_h(px(69.)).flex().flex_col())
                     .child(editor_box)
                     .when(slash, |d| d.child(div().absolute().left(px(16.)).top(px(36.)).child(slash_menu("reply-slash", &reply)))),
             )
