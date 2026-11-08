@@ -10,3 +10,10 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 log.workspace = true
+chrono = "0.4"
+ammonia = "4"
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+regex = "1"
+uuid = { version = "1", features = ["v4"] }
+env_logger = "0.11"
+futures = "0.3"
