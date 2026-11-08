@@ -19,6 +19,10 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
   can't be selected or copied, links show no pointer cursor or hover state, and there is no
   find-in-message. Hit-testing already works (clicks open links), so selection is the next
   step. `crates/flint/src/views/mailview.rs`, `crates/flint-html`.
+- **Low** — GPUI app: unsent reply text is kept per conversation only while the app runs;
+  quitting loses it (saving it as a Gmail draft would fix that). Sideways scrolling in wide
+  mail is checked with an injected wheel event, since computer use can't send horizontal
+  scrolls; a real trackpad hasn't exercised it. `crates/flint/src/views/thread.rs`.
 - **Low** — GPUI app: mail that sets a dark text color without its own background reads dark
   on the dark ground (the Electron app had the same problem). Needs a contrast pass, or a
   light page behind such mail. `crates/flint/src/views/mailview.rs`.
@@ -69,6 +73,13 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
 
 ## Fixed
 
+- ~~**High** — GPUI app: unsent reply text vanished on leaving a conversation, and Undo Send could put the text in a different conversation's composer. `crates/flint/src/views/thread.rs`.~~ Text is kept per conversation and Undo returns it to its own. `a7c5a9a`
+- ~~**High** — GPUI app: fixed-width HTML mail was clipped at the column with no way to reach the rest. `crates/flint/src/views/mailview.rs`, `crates/flint-html`.~~ It paints in full and scrolls sideways. `3831b6d`
+- ~~**Medium** — GPUI app: a sideways swipe scrolled every page vertically. `crates/flint/src/views/list.rs`.~~ Pages are restricted to their axis. `b637fb1`
+- ~~**Medium** — GPUI app: opening a reply near the bottom of a thread left Send below the window. `crates/flint/src/views/thread.rs`.~~ The card scrolls into view. `a7c5a9a`
+- ~~**Medium** — GPUI app: at high zoom the reply toolbar ran over its corner buttons, the footer hint left the card, and the full-screen editor could collapse to nothing. `crates/flint/src/views/editor.rs`, `thread.rs`.~~ The toolbar wraps, the hint truncates, and the editor holds two lines while the card scrolls. `a7c5a9a`, `6631687`
+- ~~**Medium** — GPUI app: long CC lists ran past the window, and HTML bodies ignored the page margins at high zoom. `crates/flint/src/views/thread.rs`, `mailview.rs`.~~ `a7c5a9a`, `3831b6d`
+- ~~**Low** — GPUI app: the reply card's expand and close buttons sat about 7 px above the formatting toolbar. `crates/flint/src/views/thread.rs`.~~ `a7c5a9a`
 - ~~**Medium** — GPUI app: returning from a thread reset the list to the top and to its first page. `crates/flint/src/app.rs`.~~ The list and its scroll handle are kept while a thread or Settings is open. `7b5ae19`
 - ~~**Medium** — GPUI app: the header menu, filter and context menu ran off short windows, leaving the lower items unreachable. `crates/flint/src/views/widgets.rs`.~~ Popovers cap at the window height and scroll. `7b5ae19`
 - ~~**Medium** — GPUI app: at 250–300% zoom the icon strip overlapped the page. `crates/flint/src/views/list.rs`.~~ The left page margin always clears the strip. `7b5ae19`, `85cf3a3`
