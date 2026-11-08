@@ -19,7 +19,9 @@ use gpui_kit::base::text::{TextView, TextViewStyle};
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use crate::zoom::px;
-use std::collections::HashSet;
+use crate::views::mailview::{release, HtmlBody};
+use flint_html::HtmlWorker;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +45,16 @@ pub struct ThreadState {
     placeholder: String,
     custom_height: Option<Pixels>,
     drag: Option<(Pixels, Pixels)>,
+    /// Rendered HTML bodies by message key (documents live on the html worker)
+    pub html: HashMap<String, HtmlBody>,
+    worker: HtmlWorker,
     _subs: Vec<Subscription>,
+}
+
+impl Drop for ThreadState {
+    fn drop(&mut self) {
+        release(&self.worker, self.html.values().map(|b| b.doc_id()));
+    }
 }
 
 fn message_key(m: &WireMessage) -> String {
@@ -51,7 +62,7 @@ fn message_key(m: &WireMessage) -> String {
 }
 
 impl ThreadState {
-    pub fn new(thread_ref: ThreadRef, _app: &FlintApp, window: &mut Window, cx: &mut Context<FlintApp>) -> Self {
+    pub fn new(thread_ref: ThreadRef, app: &FlintApp, window: &mut Window, cx: &mut Context<FlintApp>) -> Self {
         let reply = cx.new(|cx| TextareaState::new(window, cx).placeholder("Reply…").auto_grow(4, 18));
         let sub = cx.subscribe_in(&reply, window, |this: &mut FlintApp, state, ev: &InputEvent, _, cx| {
             if let InputEvent::Change = ev {
@@ -75,6 +86,8 @@ impl ThreadState {
             placeholder: "Reply…".into(),
             custom_height: None,
             drag: None,
+            html: HashMap::new(),
+            worker: app.html.clone(),
             _subs: vec![sub],
         }
     }
@@ -111,6 +124,10 @@ impl FlintApp {
             PageState::Thread(t) => Some(t),
             _ => None,
         }
+    }
+
+    pub fn html_body_mut(&mut self, key: &str) -> Option<&mut HtmlBody> {
+        self.thread_mut()?.html.get_mut(key)
     }
 
     fn thread_mut(&mut self) -> Option<&mut ThreadState> {
@@ -236,7 +253,7 @@ impl FlintApp {
         format!("to {}", self.contacts.names(&m.to))
     }
 
-    fn message_block(&mut self, i: usize, m: &WireMessage, first: bool, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn message_block(&mut self, i: usize, m: &WireMessage, first: bool, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let id = self.contacts.resolve(&m.from);
         let own = self.is_own_address(&m.from.address);
         let cc = if m.cc.is_empty() { String::new() } else { format!(", cc {}", self.contacts.names(&m.cc)) };
@@ -293,10 +310,24 @@ impl FlintApp {
         let body: AnyElement = match &m.body_html {
             Some(html) => {
                 let allow = self.thread().is_some_and(|t| t.images.contains(&key));
-                let clean = sanitize_for_display(html, allow);
+                if let Some(t) = self.thread_mut() {
+                    t.html.entry(key.clone()).or_insert_with(|| HtmlBody::new(html));
+                }
+                let rendered = self.html_body(&key, allow, window, cx);
+                let (blocked, failed) = self
+                    .thread()
+                    .and_then(|t| t.html.get(&key))
+                    .map(|b| (b.blocked(), b.failed()))
+                    .unwrap_or((0, false));
                 let k = key.clone();
+                let content = match rendered {
+                    Some(el) => el,
+                    // Blitz could not lay it out: fall back to the document view
+                    None if failed => html_view(("html", i), sanitize_for_display(html, allow).html).into_any_element(),
+                    None => self.html_placeholder().into_any_element(),
+                };
                 div()
-                    .when(clean.blocked_images > 0, |d| {
+                    .when(blocked > 0 && !allow, |d| {
                         d.child(
                             div()
                                 .mt(px(10.))
@@ -323,7 +354,7 @@ impl FlintApp {
                                 ),
                         )
                     })
-                    .child(div().mt(px(10.)).child(html_view(("html", i), clean.html)))
+                    .child(div().mt(px(10.)).child(content))
                     .into_any_element()
             }
             None => {

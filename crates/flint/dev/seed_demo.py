@@ -79,6 +79,41 @@ RELEASE = """<p>Hi Alex,</p><p>Release <code>v2.4.0</code> is tagged. Highlights
 <pre><code>cargo install northwind-cli --version 2.4.0</code></pre>
 <p>Thanks, <a href="mailto:sam@northwind.example">Sam</a></p>"""
 
+REVIEW = """<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5">
+<p><b>@samchen</b> requested changes on this pull request.</p>
+<hr style="border:0;border-top:1px solid #d0d7de">
+<p>In <a href="https://github.example/northwind/cli/pull/412/files#diff-1">src/sync.rs</a>:</p>
+<pre style="background:#f6f8fa;color:#24292f;padding:8px;border-radius:6px;font-size:12px">&gt; let batch = fetch_page(token).await?;
+&gt; for msg in batch { store.insert(msg)?; }</pre>
+<p>This holds the write lock across the whole page. Can we insert in one transaction instead?</p>
+<p style="font-size:12px;color:#57606a">—<br>Reply to this email directly, <a href="https://github.example/northwind/cli/pull/412#pullrequestreview-1">view it on GitHub</a>, or <a href="https://github.example/notifications/unsubscribe">unsubscribe</a>.</p>
+<img src="https://github.example/notifications/beacon/abc.gif" height="1" width="1" alt="">
+</div>
+"""
+
+PROMO = """<html><head><style>
+.btn { background:#ff5a5f; color:#ffffff !important; padding:12px 28px; border-radius:6px; text-decoration:none; font-weight:bold; display:inline-block }
+@media (max-width: 600px) { .wrap { width:100% !important } }
+</style></head>
+<body style="margin:0;background:#f2f2f2">
+<table width="100%" cellpadding="0" cellspacing="0" bgcolor="#f2f2f2"><tr><td align="center" style="padding:24px 0">
+<table class="wrap" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;font-family:Arial,sans-serif;color:#333333">
+<tr><td style="padding:28px 32px 8px"><h1 style="margin:0;font-size:26px;color:#111">Your weekend getaway awaits</h1></td></tr>
+<tr><td style="padding:8px 32px;font-size:15px;line-height:22px">Cozy cabins near the lake are <b>20% off</b> this month. Book by Sunday to lock in the price.</td></tr>
+<tr><td style="padding:8px 32px"><table width="100%"><tr>
+<td width="50%" style="padding:8px;background:#fafafa;border:1px solid #eee"><b>Pine Cabin</b><br><span style="color:#888">Sleeps 4 · $129/night</span></td>
+<td width="50%" style="padding:8px;background:#fafafa;border:1px solid #eee"><b>Lakeside Loft</b><br><span style="color:#888">Sleeps 2 · $99/night</span></td>
+</tr></table></td></tr>
+<tr><td align="center" style="padding:20px 32px 28px"><a class="btn" href="https://stays.example/deals">See the deals</a></td></tr>
+<tr><td style="padding:16px 32px;font-size:11px;color:#999;border-top:1px solid #eee">You're receiving this because you signed up at stays.example. <a href="https://stays.example/unsub" style="color:#999">Unsubscribe</a></td></tr>
+</table></td></tr></table>
+<img src="https://track.stays.example/open.gif" width="1" height="1">
+</body></html>
+"""
+
+QUOTED = """<div dir="ltr">Sounds good, Thursday at 6 works for me. I'll bring the new expansion.<div><br></div><div>— Jake</div></div><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">On Wed, Nov 4, 2026 at 9:12 AM Alex Rivera &lt;alex.rivera@example.com&gt; wrote:<br></div><blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">Board games Thursday? Priya might come too.</blockquote></div>
+"""
+
 
 def main(path: str) -> None:
     if os.path.exists(path):
@@ -145,6 +180,19 @@ def main(path: str) -> None:
         "I left a few questions in the risks section. Mostly about the hiring timeline.", important=True, cc=[sam])
     msg(P, "t-lee", lee, [ME], "Camera for sale", 12 * D, "Still have the Fuji? I can pick it up this weekend.",
         important=True, seen=True)
+
+    # Real-world HTML shapes for the renderer: a styled marketing email, a code review
+    # notification, a reply quoting the thread
+    msg(P, "t-promo", {"name": "Lakeside Stays", "address": "hello@stays.example"}, [ME],
+        "Your weekend getaway awaits", 40 * 60 * 1000, "Cozy cabins near the lake are 20% off this month.",
+        important=True, html=PROMO)
+    msg(W, "t-review412", {"name": "Sam Chen", "address": "notifications@github.example"}, [WORK],
+        "Re: [northwind/cli] Batch inserts during sync (PR #412)", 70 * 60 * 1000,
+        "@samchen requested changes on this pull request.", important=True, html=REVIEW)
+    msg(P, "t-games", ME, [jake], "Board games Thursday?", 2 * D, "Board games Thursday? Priya might come too.",
+        seen=True, important=True)
+    msg(P, "t-games", jake, [ME], "Re: Board games Thursday?", 100 * 60 * 1000,
+        "Sounds good, Thursday at 6 works for me.", important=True, html=QUOTED)
 
     # Bundles: notifications, people, invites
     for i, (who, subj) in enumerate([

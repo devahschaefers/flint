@@ -22,6 +22,7 @@ use std::sync::LazyLock;
 pub struct SanitizedHtml {
     pub html: String,
     /// Elements whose remote image was removed (0 when images are allowed)
+    #[cfg_attr(not(test), allow(dead_code))]
     pub blocked_images: usize,
 }
 

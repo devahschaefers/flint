@@ -2137,6 +2137,7 @@ dependencies = [
  "chrono",
  "env_logger",
  "flint-core",
+ "flint-html",
  "futures",
  "gpui-kit",
  "gpui-pre",

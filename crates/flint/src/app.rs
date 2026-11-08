@@ -188,7 +188,7 @@ impl ListPage {
 
 pub enum PageState {
     List(ListPage),
-    Thread(ThreadState),
+    Thread(Box<ThreadState>),
     Settings(SettingsState),
 }
 
@@ -218,6 +218,8 @@ pub fn make_message_id() -> String {
 
 pub struct FlintApp {
     pub engine: Engine,
+    /// Mail HTML renderer thread (see views/mailview.rs)
+    pub html: flint_html::HtmlWorker,
     pub focus: FocusHandle,
     pub scroll: ScrollHandle,
 
@@ -276,6 +278,7 @@ impl FlintApp {
 
         let mut app = FlintApp {
             engine,
+            html: flint_html::HtmlWorker::spawn(),
             focus,
             scroll: ScrollHandle::new(),
             view: Screen::Inbox,
@@ -582,7 +585,7 @@ impl FlintApp {
         self.context_menu = None;
         self.hovered_row = None;
         self.page = match &view {
-            Screen::Thread(r) => PageState::Thread(ThreadState::new(r.clone(), self, window, cx)),
+            Screen::Thread(r) => PageState::Thread(Box::new(ThreadState::new(r.clone(), self, window, cx))),
             Screen::Settings => PageState::Settings(SettingsState::new(self, window, cx)),
             _ => PageState::List(ListPage::new()),
         };
