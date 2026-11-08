@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/flint-core", "crates/flint"]
+members = ["crates/flint-core", "crates/flint-html", "crates/flint"]
 
 [workspace.package]
 edition = "2021"
