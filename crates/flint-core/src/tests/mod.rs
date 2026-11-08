@@ -4,6 +4,7 @@
 
 mod db_tests;
 mod engine_tests;
+mod gmail_http_tests;
 mod outbox_tests;
 mod queries_tests;
 mod storage_tests;
