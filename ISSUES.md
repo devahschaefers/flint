@@ -73,6 +73,10 @@ note the commit; don't delete it. Features and ideas live in TODO.md, not here.
 
 ## Fixed
 
+- ~~**High** — GPUI app: the composer's text area collapsed to one visible line. `crates/flint/src/views/compose.rs`, `editor.rs`.~~ It fills the card and scrolls itself. `c848f2c`
+- ~~**High** — GPUI app: long recipient lists, short windows and high zoom pushed Subject, Send and the footer out of reach in the composer. `crates/flint/src/views/compose.rs`.~~ Chips are capped and scroll; the card scrolls. `c848f2c`
+- ~~**Medium** — GPUI app: search's arrow-key selection moved out of view, its advertised ⌘N opened a blank composer behind search, and opening a result over the composer hid the thread. `crates/flint/src/views/search.rs`, `app.rs`.~~ `c848f2c`
+- ~~**Low** — GPUI app: New Message ignored the word-count setting. `crates/flint/src/views/compose.rs`.~~ `c848f2c`
 - ~~**High** — GPUI app: unsent reply text vanished on leaving a conversation, and Undo Send could put the text in a different conversation's composer. `crates/flint/src/views/thread.rs`.~~ Text is kept per conversation and Undo returns it to its own. `a7c5a9a`
 - ~~**High** — GPUI app: fixed-width HTML mail was clipped at the column with no way to reach the rest. `crates/flint/src/views/mailview.rs`, `crates/flint-html`.~~ It paints in full and scrolls sideways. `3831b6d`
 - ~~**Medium** — GPUI app: a sideways swipe scrolled every page vertically. `crates/flint/src/views/list.rs`.~~ Pages are restricted to their axis. `b637fb1`
